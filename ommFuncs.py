@@ -179,6 +179,159 @@ def split_sensor_origin_and_mag_vector(table_points):
     return sensor_origin, mag_vector
 
 
+def parse_serial_packet(raw_line):
+    if raw_line is None:
+        return None, None
+
+    line = raw_line.strip()
+    if not line:
+        return None, None
+
+    first_token = line.split()[0]
+    parts = first_token.split(',')
+    values = []
+
+    for part in parts:
+        token = part.strip()
+        if not token:
+            continue
+        if token in ('-', '--'):
+            return None, first_token
+        try:
+            values.append(float(token))
+        except ValueError:
+            return None, first_token
+
+    if len(values) == 0:
+        return None, first_token
+
+    return np.array(values, dtype=float), first_token
+
+
+def safe_draw_frame_axes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len):
+    try:
+        # Skip drawing when projected axis endpoints are out of frame to avoid unreliable OpenCV warnings.
+        axis_pts = np.array([
+            [0.0, 0.0, 0.0],
+            [axis_len, 0.0, 0.0],
+            [0.0, axis_len, 0.0],
+            [0.0, 0.0, axis_len],
+        ], dtype=np.float32)
+        imgpts, _ = cv2.projectPoints(axis_pts, rvec, tvec, camera_matrix, dist_coeffs)
+        pts = imgpts.reshape(-1, 2)
+        if not np.all(np.isfinite(pts)):
+            return img
+
+        h, w = img.shape[:2]
+        if np.any(pts[:, 0] < 0) or np.any(pts[:, 0] >= w) or np.any(pts[:, 1] < 0) or np.any(pts[:, 1] >= h):
+            return img
+
+        return cv2.drawFrameAxes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len)
+    except cv2.error:
+        return img
+
+
+def scale_magnetic_vector(raw_vec_ut, base_scale_m_per_ut, scale_multiplier=1.0, length_power=1.0):
+    """Scale a magnetic vector for display while preserving direction."""
+    raw_vec_ut = np.asarray(raw_vec_ut, dtype=float).reshape(3)
+    mag_ut = float(np.linalg.norm(raw_vec_ut))
+    if not np.isfinite(mag_ut) or mag_ut <= 0.0:
+        return np.zeros(3, dtype=float), 0.0
+
+    unit_vec = raw_vec_ut / mag_ut
+    scaled_len_m = float(base_scale_m_per_ut * scale_multiplier * (mag_ut ** length_power))
+    return unit_vec * scaled_len_m, mag_ut
+
+
+def strength_to_bgr(strength, min_strength, max_strength):
+    """Map vector strength to BGR color (blue=weak, red=strong)."""
+    if not np.isfinite(strength):
+        return (255, 255, 255)
+    if not np.isfinite(min_strength) or not np.isfinite(max_strength) or max_strength <= min_strength:
+        return (0, 255, 255)
+
+    t = (strength - min_strength) / (max_strength - min_strength)
+    t = float(np.clip(t, 0.0, 1.0))
+    r = int(round(255.0 * t))
+    g = 0
+    b = int(round(255.0 * (1.0 - t)))
+    return (b, g, r)
+
+
+def board_point_to_table(point_board, rvec_board, tvec_board, rvec_table, tvec_table):
+    point_board = np.asarray(point_board, dtype=float).reshape(1, 3)
+    point_table = transform_points_between_frames(point_board, rvec_board, tvec_board, rvec_table, tvec_table)
+    return point_table.reshape(3)
+
+
+def board_vector_to_table(vec_board, rvec_board, rvec_table):
+    """Rotate a vector from board frame to table frame (no translation)."""
+    vec_board = np.asarray(vec_board, dtype=float).reshape(3)
+    r_board_to_cam, _ = cv2.Rodrigues(rvec_board)
+    r_table_to_cam, _ = cv2.Rodrigues(rvec_table)
+    r_board_to_table = r_table_to_cam.T @ r_board_to_cam
+    return (r_board_to_table @ vec_board.reshape(3, 1)).reshape(3)
+
+
+def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_wh):
+    x0, y0 = origin_xy
+    w, h = size_wh
+    if w <= 2 or h <= 2:
+        return img
+
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + w, y0 + h), (20, 20, 20), -1)
+    img = cv2.addWeighted(overlay, 0.45, img, 0.55, 0)
+    cv2.rectangle(img, (x0, y0), (x0 + w, y0 + h), (130, 130, 130), 1)
+
+    comp_arrays = [np.asarray(history_x, dtype=float), np.asarray(history_y, dtype=float), np.asarray(history_z, dtype=float)]
+    finite_vals = np.concatenate([arr[np.isfinite(arr)] for arr in comp_arrays if arr.size > 0])
+    if finite_vals.size == 0:
+        cv2.putText(img, "mx,my,mz trace (uT): no data", (x0 + 8, y0 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (190, 190, 190), 1, cv2.LINE_AA)
+        return img
+
+    max_abs = float(np.max(np.abs(finite_vals)))
+    max_abs = max(max_abs, 1.0)
+    max_abs *= 1.1
+
+    y_mid = y0 + h // 2
+    cv2.line(img, (x0 + 1, y_mid), (x0 + w - 1, y_mid), (80, 80, 80), 1)
+
+    def y_from_val(v):
+        if not np.isfinite(v):
+            return None
+        yn = (v / max_abs)
+        return int(round(y_mid - yn * (h * 0.45)))
+
+    def draw_series(values, color):
+        n = len(values)
+        if n < 2:
+            return
+        for i in range(1, n):
+            v1 = values[i - 1]
+            v2 = values[i]
+            if not (np.isfinite(v1) and np.isfinite(v2)):
+                continue
+            x1 = int(round(x0 + (i - 1) * (w - 1) / max(n - 1, 1)))
+            x2 = int(round(x0 + i * (w - 1) / max(n - 1, 1)))
+            y1 = y_from_val(v1)
+            y2 = y_from_val(v2)
+            if y1 is None or y2 is None:
+                continue
+            cv2.line(img, (x1, y1), (x2, y2), color, 1)
+
+    draw_series(comp_arrays[0], (0, 0, 255))
+    draw_series(comp_arrays[1], (0, 255, 0))
+    draw_series(comp_arrays[2], (255, 0, 0))
+
+    cv2.putText(img, "mx", (x0 + 8, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, "my", (x0 + 40, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, "mz", (x0 + 72, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, f"+/- {max_abs:.1f} uT", (x0 + 110, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (210, 210, 210), 1, cv2.LINE_AA)
+
+    return img
+
+
 def drawWall(img, imgpts):    
     # imgpts seems to have dimensions noPts x 1 x (x,y)
     img = cv2.line(img, (imgpts[0,0,0].astype(int),imgpts[0,0,1].astype(int)),(imgpts[1,0,0].astype(int),imgpts[1,0,1].astype(int)) , color=(0,0,200), thickness=5)
