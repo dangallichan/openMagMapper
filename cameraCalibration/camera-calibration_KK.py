@@ -14,8 +14,9 @@ import matplotlib.pyplot as plt
 # outDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_POCO"
 
 
-calibrationDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam\calib_images"
-outDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam"
+calibrationDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam_Yimona\calib_images"
+outDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam_Yimona"
+
 
 
 # imgPathList = glob.glob(os.path.join(calibrationDir,'*.JPG'))

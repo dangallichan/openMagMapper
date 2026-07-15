@@ -11,6 +11,7 @@ import csv
 import serial
 import serial.tools.list_ports
 from datetime import datetime
+from collections import deque
 
 
 import ommFuncs as omm
@@ -31,15 +32,17 @@ camCapture = cv2.VideoCapture(camNumber)
 
 
 # cameraName = 'POCO'
-cameraName = 'USBwebcam_JLC1080'
+# cameraName = 'USBwebcam_JLC1080'
+cameraName = 'USBwebcam_Yimona'
 
 # Defining filenames:
 baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
-if cameraName == 'POCO':
-    calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
-elif cameraName == 'USBwebcam_JLC1080':
-    # calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1920x1080.npz')
-    calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
+# if cameraName == 'POCO':
+#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
+# elif cameraName == 'USBwebcam_JLC1080':
+#     # calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1920x1080.npz')
+#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
+calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
 
 outputVideoDir = os.path.join(baseDir, 'data','experimentData')
 os.makedirs(outputVideoDir, exist_ok=True)
@@ -55,7 +58,8 @@ outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{
 
 
 board88, cubePointsProj, markerWidthCube, cubeWidth = omm.getCubeBoard('board88_52mm')
-tableboard, tablePointsProj = omm.getTableBoard('dansDesk')
+# tableboard, tablePointsProj = omm.getTableBoard('dansDesk')
+tableboard, tablePointsProj = omm.getTableBoard('table94')
 
 sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # offset in mm (x, y, z) of sensor relative to board88
 sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relative to board88 in degrees (x, y, z)
@@ -122,6 +126,107 @@ def safe_draw_frame_axes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len):
         return cv2.drawFrameAxes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len)
     except cv2.error:
         return img
+
+
+def scale_magnetic_vector(raw_vec_ut, base_scale_m_per_ut, scale_multiplier=1.0, length_power=1.0):
+    """Scale a magnetic vector for display while preserving direction."""
+    raw_vec_ut = np.asarray(raw_vec_ut, dtype=float).reshape(3)
+    mag_ut = float(np.linalg.norm(raw_vec_ut))
+    if not np.isfinite(mag_ut) or mag_ut <= 0.0:
+        return np.zeros(3, dtype=float), 0.0
+
+    unit_vec = raw_vec_ut / mag_ut
+    scaled_len_m = float(base_scale_m_per_ut * scale_multiplier * (mag_ut ** length_power))
+    return unit_vec * scaled_len_m, mag_ut
+
+
+def strength_to_bgr(strength, min_strength, max_strength):
+    """Map vector strength to BGR color (blue=weak, red=strong)."""
+    if not np.isfinite(strength):
+        return (255, 255, 255)
+    if not np.isfinite(min_strength) or not np.isfinite(max_strength) or max_strength <= min_strength:
+        return (0, 255, 255)
+
+    t = (strength - min_strength) / (max_strength - min_strength)
+    t = float(np.clip(t, 0.0, 1.0))
+    r = int(round(255.0 * t))
+    g = 0
+    b = int(round(255.0 * (1.0 - t)))
+    return (b, g, r)
+
+
+def board_point_to_table(point_board, rvec_board, tvec_board, rvec_table, tvec_table):
+    point_board = np.asarray(point_board, dtype=float).reshape(1, 3)
+    point_table = omm.transform_points_between_frames(point_board, rvec_board, tvec_board, rvec_table, tvec_table)
+    return point_table.reshape(3)
+
+
+def board_vector_to_table(vec_board, rvec_board, rvec_table):
+    """Rotate a vector from board frame to table frame (no translation)."""
+    vec_board = np.asarray(vec_board, dtype=float).reshape(3)
+    r_board_to_cam, _ = cv2.Rodrigues(rvec_board)
+    r_table_to_cam, _ = cv2.Rodrigues(rvec_table)
+    r_board_to_table = r_table_to_cam.T @ r_board_to_cam
+    return (r_board_to_table @ vec_board.reshape(3, 1)).reshape(3)
+
+
+def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_wh):
+    x0, y0 = origin_xy
+    w, h = size_wh
+    if w <= 2 or h <= 2:
+        return img
+
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + w, y0 + h), (20, 20, 20), -1)
+    img = cv2.addWeighted(overlay, 0.45, img, 0.55, 0)
+    cv2.rectangle(img, (x0, y0), (x0 + w, y0 + h), (130, 130, 130), 1)
+
+    comp_arrays = [np.asarray(history_x, dtype=float), np.asarray(history_y, dtype=float), np.asarray(history_z, dtype=float)]
+    finite_vals = np.concatenate([arr[np.isfinite(arr)] for arr in comp_arrays if arr.size > 0])
+    if finite_vals.size == 0:
+        cv2.putText(img, "mx,my,mz trace (uT): no data", (x0 + 8, y0 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (190, 190, 190), 1, cv2.LINE_AA)
+        return img
+
+    max_abs = float(np.max(np.abs(finite_vals)))
+    max_abs = max(max_abs, 1.0)
+    max_abs *= 1.1
+
+    y_mid = y0 + h // 2
+    cv2.line(img, (x0 + 1, y_mid), (x0 + w - 1, y_mid), (80, 80, 80), 1)
+
+    def y_from_val(v):
+        if not np.isfinite(v):
+            return None
+        yn = (v / max_abs)
+        return int(round(y_mid - yn * (h * 0.45)))
+
+    def draw_series(values, color):
+        n = len(values)
+        if n < 2:
+            return
+        for i in range(1, n):
+            v1 = values[i - 1]
+            v2 = values[i]
+            if not (np.isfinite(v1) and np.isfinite(v2)):
+                continue
+            x1 = int(round(x0 + (i - 1) * (w - 1) / max(n - 1, 1)))
+            x2 = int(round(x0 + i * (w - 1) / max(n - 1, 1)))
+            y1 = y_from_val(v1)
+            y2 = y_from_val(v2)
+            if y1 is None or y2 is None:
+                continue
+            cv2.line(img, (x1, y1), (x2, y2), color, 1)
+
+    draw_series(comp_arrays[0], (0, 0, 255))
+    draw_series(comp_arrays[1], (0, 255, 0))
+    draw_series(comp_arrays[2], (255, 0, 0))
+
+    cv2.putText(img, "mx", (x0 + 8, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, "my", (x0 + 40, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, "mz", (x0 + 72, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, f"+/- {max_abs:.1f} uT", (x0 + 110, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (210, 210, 210), 1, cv2.LINE_AA)
+
+    return img
 
 # %%
 
@@ -234,10 +339,21 @@ iFrame = -1
 lastMagVectorPts = None
 lastMagUpdateTime = None
 lastMagMagnitudeUT = None
+lastMagRawVectorUT = None
 badSerialPacketCount = 0
 frozenVectorsTable = []
 autoFreezeEnabled = False
 nextAutoFreezeTime = 0.0
+
+baseViewScaleMPerUT = 5e-2 / 1000.0
+vectorScaleMultiplier = 1.0
+vectorLengthPower = 1.0
+vectorScaleStep = 1.15
+vectorPowerStep = 0.1
+traceHistoryLen = 240
+mxHistory = deque(maxlen=traceHistoryLen)
+myHistory = deque(maxlen=traceHistoryLen)
+mzHistory = deque(maxlen=traceHistoryLen)
 # Capture live webcam images until 'q' is pressed
 while True:
 
@@ -291,15 +407,34 @@ while True:
                 cv2.line(overlayFrame, (x - cross_size, y), (x + cross_size, y), (0, 170, 170), 3)
                 cv2.line(overlayFrame, (x, y - cross_size), (x, y + cross_size), (0, 170, 170), 3)
 
+            frozen_strengths = [float(v.get('magnitude_ut', np.nan)) for v in frozenVectorsTable]
+            finite_frozen_strengths = [v for v in frozen_strengths if np.isfinite(v)]
+            if finite_frozen_strengths:
+                frozen_min_strength = min(finite_frozen_strengths)
+                frozen_max_strength = max(finite_frozen_strengths)
+            else:
+                frozen_min_strength = np.nan
+                frozen_max_strength = np.nan
+
             for frozenVecTable in frozenVectorsTable:
-                imgptsFrozen, _ = cv2.projectPoints(frozenVecTable, rvecTable, tvecTable, camera_matrix, dist_coeffs)
+                origin_table_m = np.asarray(frozenVecTable['origin_table_m'], dtype=float).reshape(3)
+                raw_vec_table_ut = np.asarray(frozenVecTable['raw_vec_table_ut'], dtype=float).reshape(3)
+                scaled_vec_table_m, frozen_mag_ut = scale_magnetic_vector(
+                    raw_vec_table_ut,
+                    baseViewScaleMPerUT,
+                    scale_multiplier=vectorScaleMultiplier,
+                    length_power=vectorLengthPower,
+                )
+                frozen_draw_pts = np.vstack((origin_table_m, origin_table_m + scaled_vec_table_m)).astype(np.float32)
+                imgptsFrozen, _ = cv2.projectPoints(frozen_draw_pts, rvecTable, tvecTable, camera_matrix, dist_coeffs)
                 imgptsFrozen[imgptsFrozen >= 1e6] = 1e6
                 imgptsFrozen[imgptsFrozen <= -1e6] = -1e6
+                frozen_color = strength_to_bgr(frozen_mag_ut, frozen_min_strength, frozen_max_strength)
                 colorFrame = cv2.arrowedLine(
                     colorFrame,
                     (imgptsFrozen[0, 0, 0].astype(int), imgptsFrozen[0, 0, 1].astype(int)),
                     (imgptsFrozen[1, 0, 0].astype(int), imgptsFrozen[1, 0, 1].astype(int)),
-                    (255, 0, 255),
+                    frozen_color,
                     2,
                 )
 
@@ -308,6 +443,7 @@ while True:
         sensor_data_received = 0
         serial_values = np.full(10, np.nan, dtype=float)
         raw_serial_line = ''
+        currentMagSampleUT = np.full(3, np.nan, dtype=float)
 
         try:
             if ser and ser.in_waiting > 0:
@@ -324,36 +460,46 @@ while True:
                     raw_serial_line = parsedSerialLine
                     sensor_data_received = 1
 
-                    # viewScale = 5e-2/200  # should scale so that 200 uT is 5cm
-                    viewScale = 5e-2/1000
-
-                    magVectorPts = viewScale * newDataRow[1:4]
-
-                    if magVectorPts.ndim == 1:
-                        magVectorPts = magVectorPts.reshape(1, -1)
-                    magVectorPts = np.concatenate(([[0, 0, 0]], magVectorPts))
-
-                    # apply the rotation and translation to the mag vector points to account for the sensor offset and rotation relative to the board88
-                    magVectorPts = np.dot(magVectorPts, sensor_rot_board.T)
-                    magVectorPts = magVectorPts + sensor_offset_m
+                    rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
+                    currentMagSampleUT = rawMagVectorUT.copy()
+                    scaledMagVectorSensorM, magMagnitudeUT = scale_magnetic_vector(
+                        rawMagVectorUT,
+                        baseViewScaleMPerUT,
+                        scale_multiplier=vectorScaleMultiplier,
+                        length_power=vectorLengthPower,
+                    )
+                    scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
 
                     # Keep the latest valid vector so rendering can continue through serial gaps.
-                    lastMagVectorPts = magVectorPts.copy()
+                    lastMagRawVectorUT = rawMagVectorUT.copy()
+                    lastMagVectorPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
                     lastMagUpdateTime = time.monotonic()
-                    lastMagMagnitudeUT = float(np.linalg.norm(newDataRow[1:4]))
+                    lastMagMagnitudeUT = magMagnitudeUT
 
                     serial_values[:min(len(newDataRow), 10)] = newDataRow[:10]
 
         except Exception as e:
             print("Error reading from serial port:", e)
 
+        mxHistory.append(float(currentMagSampleUT[0]))
+        myHistory.append(float(currentMagSampleUT[1]))
+        mzHistory.append(float(currentMagSampleUT[2]))
+
         host_time_iso = datetime.now().isoformat(timespec='milliseconds')
         host_time_monotonic = time.monotonic()
         sensor_table_values = np.full(3, np.nan, dtype=float)
         mag_table_values = np.full(3, np.nan, dtype=float)
 
-        if lastMagVectorPts is not None and retval88 and retvalTable:
-            magVectorTablePts = omm.transform_points_between_frames(lastMagVectorPts, rvec88, tvec88, rvecTable, tvecTable)
+        if lastMagRawVectorUT is not None and retval88 and retvalTable:
+            scaledMagVectorSensorM, _ = scale_magnetic_vector(
+                lastMagRawVectorUT,
+                baseViewScaleMPerUT,
+                scale_multiplier=vectorScaleMultiplier,
+                length_power=vectorLengthPower,
+            )
+            scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+            currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
+            magVectorTablePts = omm.transform_points_between_frames(currentMagVectorBoardPts, rvec88, tvec88, rvecTable, tvecTable)
             sensor_table_values, mag_table_values = omm.split_sensor_origin_and_mag_vector(magVectorTablePts)
 
         dataWriter.writerow([
@@ -382,10 +528,18 @@ while True:
             int(retval88),
         ])
 
-        if lastMagVectorPts is not None and retval88:
+        if lastMagRawVectorUT is not None and retval88:
             is_stale = lastMagUpdateTime is not None and (time.monotonic() - lastMagUpdateTime) > STALE_VECTOR_TIMEOUT_SEC
             try:
-                imgpts,_ = cv2.projectPoints(lastMagVectorPts, rvec88, tvec88, camera_matrix, dist_coeffs)
+                scaledMagVectorSensorM, _ = scale_magnetic_vector(
+                    lastMagRawVectorUT,
+                    baseViewScaleMPerUT,
+                    scale_multiplier=vectorScaleMultiplier,
+                    length_power=vectorLengthPower,
+                )
+                scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+                currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
+                imgpts,_ = cv2.projectPoints(currentMagVectorBoardPts, rvec88, tvec88, camera_matrix, dist_coeffs)
                 imgpts[imgpts >= 1e6] = 1e6  # try to handle outlier large magnitudes...
                 imgpts[imgpts <= -1e6] = -1e6
 
@@ -406,26 +560,43 @@ while True:
         mag_text_color = (0, 165, 255) if mag_is_stale else (0, 255, 0)
         cv2.putText(colorFrame, mag_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.9, mag_text_color, 2, cv2.LINE_AA)
 
+        scale_text = f"Scale x{vectorScaleMultiplier:.2f}  Power {vectorLengthPower:.2f}"
+        cv2.putText(colorFrame, scale_text, (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+        controls_text = "+/- scale   [/] power   Space freeze   Enter auto-freeze   q quit"
+        cv2.putText(colorFrame, controls_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1, cv2.LINE_AA)
+
+        trace_w = min(380, max(220, frameWidth // 3))
+        trace_h = 150
+        trace_x = 20
+        trace_y = max(20, frameHeight - trace_h - 20)
+        colorFrame = draw_component_trace(colorFrame, mxHistory, myHistory, mzHistory, (trace_x, trace_y), (trace_w, trace_h))
+
         frozen_count_text = f"Frozen vectors: {len(frozenVectorsTable)}"
         cv2.putText(colorFrame, frozen_count_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)
 
         if autoFreezeEnabled:
             now_mono = time.monotonic()
             if now_mono >= nextAutoFreezeTime:
-                if retval88 and retvalTable and lastMagVectorPts is not None:
-                    frozenVecTable = omm.transform_points_between_frames(lastMagVectorPts, rvec88, tvec88, rvecTable, tvecTable)
-                    frozenSensorTableValues, frozenMagTableValues = omm.split_sensor_origin_and_mag_vector(frozenVecTable)
-                    frozenVectorsTable.append(frozenVecTable)
+                if retval88 and retvalTable and lastMagRawVectorUT is not None:
+                    rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                    frozenOriginTableM = board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
+                    frozenRawVecTableUT = board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
+                    frozenVectorsTable.append({
+                        'origin_table_m': frozenOriginTableM,
+                        'raw_vec_table_ut': frozenRawVecTableUT,
+                        'magnitude_ut': float(np.linalg.norm(lastMagRawVectorUT)),
+                    })
                     frozenVectorsWriter.writerow([
                         len(frozenVectorsTable),
                         datetime.now().isoformat(timespec='milliseconds'),
                         iFrame,
-                        frozenSensorTableValues[0],
-                        frozenSensorTableValues[1],
-                        frozenSensorTableValues[2],
-                        frozenMagTableValues[0],
-                        frozenMagTableValues[1],
-                        frozenMagTableValues[2],
+                        frozenOriginTableM[0],
+                        frozenOriginTableM[1],
+                        frozenOriginTableM[2],
+                        frozenRawVecTableUT[0],
+                        frozenRawVecTableUT[1],
+                        frozenRawVecTableUT[2],
                     ])
                     freeze_period_sec = 1.0 / max(AUTO_FREEZE_RATE_HZ, 1e-6)
                     nextAutoFreezeTime = now_mono + freeze_period_sec
@@ -445,23 +616,45 @@ while True:
                 print("Auto-freeze disabled.")
 
         if key == ord(' '):
-            if retval88 and retvalTable and lastMagVectorPts is not None:
-                frozenVecTable = omm.transform_points_between_frames(lastMagVectorPts, rvec88, tvec88, rvecTable, tvecTable)
-                frozenSensorTableValues, frozenMagTableValues = omm.split_sensor_origin_and_mag_vector(frozenVecTable)
-                frozenVectorsTable.append(frozenVecTable)
+            if retval88 and retvalTable and lastMagRawVectorUT is not None:
+                rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                frozenOriginTableM = board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
+                frozenRawVecTableUT = board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
+                frozenVectorsTable.append({
+                    'origin_table_m': frozenOriginTableM,
+                    'raw_vec_table_ut': frozenRawVecTableUT,
+                    'magnitude_ut': float(np.linalg.norm(lastMagRawVectorUT)),
+                })
                 frozenVectorsWriter.writerow([
                     len(frozenVectorsTable),
                     datetime.now().isoformat(timespec='milliseconds'),
                     iFrame,
-                    frozenSensorTableValues[0],
-                    frozenSensorTableValues[1],
-                    frozenSensorTableValues[2],
-                    frozenMagTableValues[0],
-                    frozenMagTableValues[1],
-                    frozenMagTableValues[2],
+                    frozenOriginTableM[0],
+                    frozenOriginTableM[1],
+                    frozenOriginTableM[2],
+                    frozenRawVecTableUT[0],
+                    frozenRawVecTableUT[1],
+                    frozenRawVecTableUT[2],
                 ])
             else:
                 print("Space pressed, but vector freeze requires visible board88, tableboard, and a known vector.")
+
+        if key in (ord('+'), ord('=')):
+            vectorScaleMultiplier *= vectorScaleStep
+            print(f"Vector scale multiplier increased to {vectorScaleMultiplier:.3f}")
+
+        if key in (ord('-'), ord('_')):
+            vectorScaleMultiplier /= vectorScaleStep
+            vectorScaleMultiplier = max(vectorScaleMultiplier, 1e-4)
+            print(f"Vector scale multiplier decreased to {vectorScaleMultiplier:.3f}")
+
+        if key == ord(']'):
+            vectorLengthPower = min(vectorLengthPower + vectorPowerStep, 4.0)
+            print(f"Vector length power increased to {vectorLengthPower:.2f}")
+
+        if key == ord('['):
+            vectorLengthPower = max(vectorLengthPower - vectorPowerStep, 0.0)
+            print(f"Vector length power decreased to {vectorLengthPower:.2f}")
 
         if key == ord('q'):
             break

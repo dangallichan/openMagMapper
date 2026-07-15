@@ -54,6 +54,26 @@ def getTableBoard(boardName):
 
         tableboard = aruco.Board( tableboard_corners, aruco_dict, np.arange(4) ) 
 
+    if boardName == 'table94':
+
+        ## Defining 2D base:
+        mw = 0.041 # Width of marker in metres     
+        gapX = 0.048 # x distance in between the markers
+        gapY = 0.037 # y distance in between the markers        
+
+        tableboard_corners = np.zeros([6, 4, 3], dtype=np.float32) # Array of markers on table
+
+        oneMarker = np.array([[0,0,0], [mw,0,0], [mw,-mw,0], [0,-mw,0]], dtype=np.float32)
+
+        tableboard_corners[0, :, :] = oneMarker + np.array([-gapX/2-mw, mw/2 + gapY + mw, 0], dtype=np.float32)
+        tableboard_corners[1, :, :] = oneMarker + np.array([+gapX/2, mw/2 + gapY + mw, 0], dtype=np.float32)
+        tableboard_corners[2, :, :] = oneMarker + np.array([-gapX/2-mw, mw/2, 0], dtype=np.float32)
+        tableboard_corners[3, :, :] = oneMarker + np.array([+gapX/2, mw/2, 0], dtype=np.float32)
+        tableboard_corners[4, :, :] = oneMarker + np.array([-gapX/2-mw, -mw/2 - gapY, 0], dtype=np.float32)
+        tableboard_corners[5, :, :] = oneMarker + np.array([+gapX/2, -mw/2 - gapY, 0], dtype=np.float32)
+
+        tableboard = aruco.Board( tableboard_corners, aruco_dict, np.arange(94, 100) )
+
     tablePointsProj = tableboard_corners.reshape(-1, 3).astype(np.float32)
     return tableboard, tablePointsProj
 
