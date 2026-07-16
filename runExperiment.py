@@ -8,7 +8,7 @@ import pandas as pd
 from mpl_toolkits.mplot3d import Axes3D
 import os, sys, time
 import csv
-import serial
+import serial  # from pyserial package
 import serial.tools.list_ports
 from datetime import datetime
 from collections import deque
