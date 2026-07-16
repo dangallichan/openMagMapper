@@ -190,9 +190,9 @@ frozenVectorsTable = []
 autoFreezeEnabled = False
 nextAutoFreezeTime = 0.0
 
-baseViewScaleMPerUT = 5e-2 / 1000.0
+baseViewScaleMPerUT = 15e-2 / 1000.0
 vectorScaleMultiplier = 1.0
-vectorLengthPower = 1.0
+vectorLengthPower = 0.5
 vectorScaleStep = 1.15
 vectorPowerStep = 0.1
 traceHistoryLen = 240
@@ -272,7 +272,8 @@ while True:
                     scale_multiplier=vectorScaleMultiplier,
                     length_power=vectorLengthPower,
                 )
-                frozen_draw_pts = np.vstack((origin_table_m, origin_table_m + scaled_vec_table_m)).astype(np.float32)
+                half_vec = 0.5 * scaled_vec_table_m
+                frozen_draw_pts = np.vstack((origin_table_m - half_vec, origin_table_m + half_vec)).astype(np.float32)
                 imgptsFrozen, _ = cv2.projectPoints(frozen_draw_pts, rvecTable, tvecTable, camera_matrix, dist_coeffs)
                 imgptsFrozen[imgptsFrozen >= 1e6] = 1e6
                 imgptsFrozen[imgptsFrozen <= -1e6] = -1e6
