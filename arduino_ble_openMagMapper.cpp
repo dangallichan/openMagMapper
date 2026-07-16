@@ -64,7 +64,8 @@ void updateServingLed(bool servingMagmlx) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
+  // Do not block on the USB serial port; BLE should start even when no host
+  // terminal is attached (for example when powered from a battery pack).
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
