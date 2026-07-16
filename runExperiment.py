@@ -33,8 +33,8 @@ camCapture = cv2.VideoCapture(camNumber)
 
 
 # cameraName = 'POCO'
-# cameraName = 'USBwebcam_JLC1080'
-cameraName = 'USBwebcam_Yimona'
+cameraName = 'USBwebcam_JLC1080'
+# cameraName = 'USBwebcam_Yimona'
 
 # Defining filenames:
 baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
@@ -151,7 +151,7 @@ sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
 SER_TIMEOUT = 0  # non-blocking serial reads in the main video loop
 BAUDRATE = 115200
 # When enabled, the live magnetometer vector comes from BLE MAGMLX instead of the serial stream.
-USE_BLE_MAGMLX = True
+USE_BLE_MAGMLX = False
 BLE_DEVICE_NAME = 'Nano33BLE_Sensor'
 # BLE_DEVICE_ADDRESS = '42:D5:F4:FB:16:1C'
 BLE_DEVICE_ADDRESS = 'D1:A3:04:CC:25:EC'  
