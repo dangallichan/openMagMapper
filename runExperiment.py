@@ -37,11 +37,6 @@ cameraName = 'USBwebcam_Yimona'
 
 # Defining filenames:
 baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
-# if cameraName == 'POCO':
-#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
-# elif cameraName == 'USBwebcam_JLC1080':
-#     # calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1920x1080.npz')
-#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
 calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
 
 outputVideoDir = os.path.join(baseDir, 'data','experimentData')
@@ -145,6 +140,7 @@ print(f"Saving frozen vectors to {outputFrozenVectorsFile}")
 OVERLAY_ALPHA = 0.35
 STALE_VECTOR_TIMEOUT_SEC = 0.5
 AUTO_FREEZE_RATE_HZ = 3.0
+TRACE_LIVE_TIMEOUT_SEC = 0.5
 
 sensor_offset_m = sensor_offset_mm / 1000.0
 sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
@@ -203,6 +199,8 @@ traceHistoryLen = 240
 mxHistory = deque(maxlen=traceHistoryLen)
 myHistory = deque(maxlen=traceHistoryLen)
 mzHistory = deque(maxlen=traceHistoryLen)
+lastTraceSampleUT = np.full(3, np.nan, dtype=float)
+lastValidSerialDataTime = None
 # Capture live webcam images until 'q' is pressed
 while True:
 
@@ -308,9 +306,11 @@ while True:
                 else:
                     raw_serial_line = parsedSerialLine
                     sensor_data_received = 1
+                    lastValidSerialDataTime = time.monotonic()
 
                     rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
                     currentMagSampleUT = rawMagVectorUT.copy()
+                    lastTraceSampleUT = rawMagVectorUT.copy()
                     scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
                         rawMagVectorUT,
                         baseViewScaleMPerUT,
@@ -330,9 +330,10 @@ while True:
         except Exception as e:
             print("Error reading from serial port:", e)
 
-        mxHistory.append(float(currentMagSampleUT[0]))
-        myHistory.append(float(currentMagSampleUT[1]))
-        mzHistory.append(float(currentMagSampleUT[2]))
+        traceSampleUT = currentMagSampleUT if sensor_data_received else lastTraceSampleUT
+        mxHistory.append(float(traceSampleUT[0]))
+        myHistory.append(float(traceSampleUT[1]))
+        mzHistory.append(float(traceSampleUT[2]))
 
         host_time_iso = datetime.now().isoformat(timespec='milliseconds')
         host_time_monotonic = time.monotonic()
@@ -419,7 +420,23 @@ while True:
         trace_h = 150
         trace_x = 20
         trace_y = max(20, frameHeight - trace_h - 20)
-        colorFrame = omm.draw_component_trace(colorFrame, mxHistory, myHistory, mzHistory, (trace_x, trace_y), (trace_w, trace_h))
+        if lastValidSerialDataTime is None:
+            trace_status = 'NO DATA'
+            trace_stale_seconds = None
+        else:
+            trace_stale_seconds = time.monotonic() - lastValidSerialDataTime
+            trace_status = 'LIVE' if trace_stale_seconds <= TRACE_LIVE_TIMEOUT_SEC else 'STALE'
+
+        colorFrame = omm.draw_component_trace(
+            colorFrame,
+            mxHistory,
+            myHistory,
+            mzHistory,
+            (trace_x, trace_y),
+            (trace_w, trace_h),
+            status=trace_status,
+            stale_seconds=trace_stale_seconds,
+        )
 
         frozen_count_text = f"Frozen vectors: {len(frozenVectorsTable)}"
         cv2.putText(colorFrame, frozen_count_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)
