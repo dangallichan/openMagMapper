@@ -12,13 +12,19 @@ import serial  # from pyserial package
 import serial.tools.list_ports
 from datetime import datetime
 from collections import deque
-
+from pathlib import Path
 
 import ommFuncs as omm
 import ommFuncs_ble as omm_ble
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from project_paths import CAMERA_NAME, EXPERIMENT_OUTPUT_DIR, CALIBRATION_FILE
+cameraBackend = cv2.CAP_DSHOW
+cameraCacheFile = str(Path(__file__).resolve().parents[1])
 
-camNumber = 0 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
+# Camera index: 0 is normally the default camera. Set to -1 to scan available
+# cameras only, without starting an experiment.
+camNumber = 1
 if camNumber == -1:
     print("Scanning for available camera indices...")
     scan_backend = cameraBackend
@@ -52,9 +58,9 @@ os.makedirs(outputVideoDir, exist_ok=True)
 
 recordingStart = datetime.now()
 recordingTimestamp = recordingStart.strftime('%Y%m%d_%H%M%S')
-outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{cameraName}_{recordingTimestamp}.avi')
-outputDataFile = os.path.join(outputVideoDir, f'Exp_cam_outputData_{cameraName}_{recordingTimestamp}.csv')
-outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{cameraName}_{recordingTimestamp}.csv')
+outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{CAMERA_NAME}_{recordingTimestamp}.avi')
+outputDataFile = os.path.join(outputVideoDir, f'Exp_cam_outputData_{CAMERA_NAME}_{recordingTimestamp}.csv')
+outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{CAMERA_NAME}_{recordingTimestamp}.csv')
 
 
 # --- Spatial models and camera calibration ---------------------------------
@@ -257,9 +263,17 @@ mzHistory = deque(maxlen=traceHistoryLen)
 lastTraceSampleUT = np.full(3, np.nan, dtype=float)
 lastValidSerialDataTime = None
 # Capture live webcam images until 'q' is pressed
+def get_latest_frame(cap, flush_count=1):
+    for _ in range(flush_count):
+        cap.grab()
+    ret, frame = cap.retrieve()
+    return ret, frame
+
+
 while True:
 
-    ret, frame = camCapture.read()    
+    # ret, frame = camCapture.read()
+    ret, frame = get_latest_frame(camCapture)
 
     if ret == True:
         iFrame += 1
@@ -393,7 +407,12 @@ while True:
             else:
                 line = None
                 if ser and ser.in_waiting > 0:
-                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    # line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    # Read all backlogged lines in the buffer, keep only the last line (most recent data)
+                    while ser.in_waiting > 0:
+                        raw_line = ser.readline().decode('utf-8', errors='ignore').strip()
+                        if raw_line:
+                            line = raw_line
 
                 if line:
                     # print(line)

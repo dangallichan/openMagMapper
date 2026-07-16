@@ -1,4 +1,11 @@
-import numpy as np  
+"""Shared vision, coordinate-transform, drawing, and hardware helper functions.
+
+Coordinate convention: OpenCV pose vectors transform points from an ArUco board
+frame into the camera frame. The helpers below use that convention consistently
+to move points and magnetic vectors between the cube, camera, and table frames.
+"""
+
+import numpy as np
 import cv2
 import cv2.aruco as aruco  
 import matplotlib.pyplot as plt
@@ -6,13 +13,18 @@ import imutils
 import serial
 import os
 
-# Initialising ArUco tracking
+# Create one reusable detector for the project's 4x4 dictionary (marker IDs 0-99).
 aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_100)
 parameters = aruco.DetectorParameters()
 parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
 
 def getCubeBoard(cubeName):
+    """Build the six-marker ArUco board model attached to the tracking cube.
+
+    All dimensions are metres and the cube centre is the board coordinate origin.
+    Returns both the Board used by solvePnP and its corners for drawing the box.
+    """
     if cubeName is None or cubeName == 'board88_52mm':
         ##boards for cube
         markerWidthCube = 0.041 # width of marker in meters     
@@ -36,6 +48,11 @@ def getCubeBoard(cubeName):
     return board88, cubePointsProj, markerWidthCube, cubeWidth
 
 def getTableBoard(boardName):
+    """Build a table reference board and return it with its drawable corners.
+
+    ``dansDesk`` and ``table94`` describe two different physical marker layouts;
+    their coordinates establish the table-frame origin used for saved data.
+    """
 
     if boardName is None or boardName == 'dansDesk':
 
@@ -78,6 +95,7 @@ def getTableBoard(boardName):
     return tableboard, tablePointsProj
 
 def getSerialPort():
+    """List serial ports and return the last enumerated device, or ``None``."""
     ports = serial.tools.list_ports.comports(include_links=False)
     for port in ports :
         print('Found port: '+ port.device)
@@ -89,13 +107,19 @@ def getSerialPort():
     return port.device
 
 def applyTformToCoords(rvec, tvec, coords):
-    """ Apply the rvec & tvec to the coords """
+    """Transform Nx3 points from a local frame into the camera frame.
+
+    OpenCV represents the pose as ``camera_point = R @ local_point + t``.
+    """
     R, _ = cv2.Rodrigues(rvec)
     coords = np.dot(R, coords.T).T + tvec.T
     return coords
 
 def detectBoard(board, detector, corners, ids, camera_matrix, dist_coeffs):
-  
+    """Estimate an ArUco board pose from markers detected in one image.
+
+    ``retval`` is False when no detected marker belongs to the requested board.
+    """
     rvec, tvec, retval = 0, 0, False
 
     if len(corners) > 0:
@@ -107,6 +131,11 @@ def detectBoard(board, detector, corners, ids, camera_matrix, dist_coeffs):
 
 
 def euler_xyz_deg_to_rotmat(euler_deg):
+    """Return the active rotation matrix for XYZ Euler angles given in degrees.
+
+    With column vectors, the returned matrix maps a sensor-frame vector into the
+    board frame when the configured Euler angles describe sensor-to-board rotation.
+    """
     rx, ry, rz = np.radians(euler_deg)
     cx, sx = np.cos(rx), np.sin(rx)
     cy, sy = np.cos(ry), np.sin(ry)
@@ -119,7 +148,11 @@ def euler_xyz_deg_to_rotmat(euler_deg):
 
 
 def draw_sensor_axes_on_board_frame(img, camera_matrix, dist_coeffs, rvec_board, tvec_board, sensor_offset_m, sensor_rot_board, axis_len_m=0.035, thickness=3):
-    # Build axis endpoints in sensor frame, transform into board frame, then project via board pose.
+    """Draw the physical sensor's local X/Y/Z axes at its cube-board location.
+
+    The input points are stored as rows, so multiplying by ``R.T`` is equivalent
+    to applying ``R`` to each column-vector axis endpoint.
+    """
     sensor_axes = np.array([
         [0.0, 0.0, 0.0],
         [axis_len_m, 0.0, 0.0],
@@ -156,7 +189,12 @@ def draw_sensor_axes_on_board_frame(img, camera_matrix, dist_coeffs, rvec_board,
 
 
 def transform_points_between_frames(points_src, rvec_src, tvec_src, rvec_dst, tvec_dst):
-    """Transform Nx3 points from src marker frame into dst marker frame using camera as intermediary."""
+    """Transform Nx3 points from one marker frame to another via the camera.
+
+    First map source points to camera coordinates, then apply the inverse of the
+    destination board pose. This is for points; use ``board_vector_to_table`` for
+    vectors because translations must not be applied to directions.
+    """
     pts = np.asarray(points_src, dtype=np.float64).reshape(-1, 3)
     r_src, _ = cv2.Rodrigues(rvec_src)
     r_dst, _ = cv2.Rodrigues(rvec_dst)
@@ -169,6 +207,7 @@ def transform_points_between_frames(points_src, rvec_src, tvec_src, rvec_dst, tv
 
 
 def split_sensor_origin_and_mag_vector(table_points):
+    """Split transformed [origin, endpoint] points into origin and direction."""
     pts = np.asarray(table_points, dtype=np.float64).reshape(-1, 3)
     if pts.shape[0] < 2:
         nan_vec = np.full(3, np.nan, dtype=np.float64)
@@ -180,6 +219,11 @@ def split_sensor_origin_and_mag_vector(table_points):
 
 
 def parse_serial_packet(raw_line):
+    """Parse a comma-separated numeric serial line into a NumPy array.
+
+    Only the first whitespace-delimited token is consumed so diagnostic text after
+    a valid packet is ignored. Invalid, blank, and placeholder packets return None.
+    """
     if raw_line is None:
         return None, None
 
@@ -209,6 +253,7 @@ def parse_serial_packet(raw_line):
 
 
 def safe_draw_frame_axes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len):
+    """Draw OpenCV pose axes only when their projected endpoints are usable."""
     try:
         # Skip drawing when projected axis endpoints are out of frame to avoid unreliable OpenCV warnings.
         axis_pts = np.array([
@@ -232,7 +277,11 @@ def safe_draw_frame_axes(img, camera_matrix, dist_coeffs, rvec, tvec, axis_len):
 
 
 def scale_magnetic_vector(raw_vec_ut, base_scale_m_per_ut, scale_multiplier=1.0, length_power=1.0):
-    """Scale a magnetic vector for display while preserving direction."""
+    """Scale a magnetic vector for display while preserving its direction.
+
+    ``length_power`` supports compressed visual scaling (e.g. 0.5) so strong
+    readings do not overwhelm weaker vectors. It does not alter saved raw data.
+    """
     raw_vec_ut = np.asarray(raw_vec_ut, dtype=float).reshape(3)
     mag_ut = float(np.linalg.norm(raw_vec_ut))
     if not np.isfinite(mag_ut) or mag_ut <= 0.0:
@@ -259,6 +308,7 @@ def strength_to_bgr(strength, min_strength, max_strength):
 
 
 def board_point_to_table(point_board, rvec_board, tvec_board, rvec_table, tvec_table):
+    """Transform one physical point from the cube board into table coordinates."""
     point_board = np.asarray(point_board, dtype=float).reshape(1, 3)
     point_table = transform_points_between_frames(point_board, rvec_board, tvec_board, rvec_table, tvec_table)
     return point_table.reshape(3)
@@ -274,6 +324,7 @@ def board_vector_to_table(vec_board, rvec_board, rvec_table):
 
 
 def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_wh, status='NO DATA', stale_seconds=None):
+    """Draw a compact live chart of the three raw magnetic components in uT."""
     x0, y0 = origin_xy
     w, h = size_wh
     if w <= 2 or h <= 2:
@@ -284,6 +335,7 @@ def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_w
     img = cv2.addWeighted(overlay, 0.45, img, 0.55, 0)
     cv2.rectangle(img, (x0, y0), (x0 + w, y0 + h), (130, 130, 130), 1)
 
+    # All three traces share a symmetric scale around zero, making their signs comparable.
     comp_arrays = [np.asarray(history_x, dtype=float), np.asarray(history_y, dtype=float), np.asarray(history_z, dtype=float)]
     finite_vals = np.concatenate([arr[np.isfinite(arr)] for arr in comp_arrays if arr.size > 0])
     if finite_vals.size == 0:
@@ -349,7 +401,8 @@ def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_w
 
 
 def drawWall(img, imgpts):    
-    # imgpts seems to have dimensions noPts x 1 x (x,y)
+    """Draw three coloured edges from projected wall corner points."""
+    # OpenCV projectPoints returns points as (count, 1, [x, y]).
     img = cv2.line(img, (imgpts[0,0,0].astype(int),imgpts[0,0,1].astype(int)),(imgpts[1,0,0].astype(int),imgpts[1,0,1].astype(int)) , color=(0,0,200), thickness=5)
     img = cv2.line(img, (imgpts[0,0,0].astype(int),imgpts[0,0,1].astype(int)),(imgpts[2,0,0].astype(int),imgpts[2,0,1].astype(int)) , color=(0,200,0), thickness=5)
     img = cv2.line(img, (imgpts[0,0,0].astype(int),imgpts[0,0,1].astype(int)),(imgpts[3,0,0].astype(int),imgpts[3,0,1].astype(int)) , color=(200,0,0), thickness=5)
@@ -357,7 +410,7 @@ def drawWall(img, imgpts):
 
 
 def drawBox(img,imgpts,color=(0,200,0)):
-    # draw a cube box on the image
+    """Draw a filled-base wireframe cuboid from eight projected corners."""
     imgpts = np.int32(imgpts).reshape(-1,2)
     # draw ground floor in green
     img = cv2.drawContours(img, [imgpts[:4]],-1,color,-3)
@@ -372,6 +425,7 @@ def drawBox(img,imgpts,color=(0,200,0)):
 
 # https://aliyasineser.medium.com/calculation-relative-positions-of-aruco-markers-eee9cc4036e3
 def inversePerspective(rvec, tvec):
+    """Invert an OpenCV marker-to-camera pose."""
     R, _ = cv2.Rodrigues(rvec)
     R = np.matrix(R).T
     invTvec = np.dot(R, np.matrix(-tvec))
@@ -379,7 +433,7 @@ def inversePerspective(rvec, tvec):
     return invRvec, invTvec
 
 def relativePosition(rvec1, tvec1, rvec2, tvec2):
-    """ Get relative position for rvec2 & tvec2. Compose the returned rvec & tvec to use composeRT with rvec2 & tvec2 """
+    """Return marker 1's pose relative to marker 2's coordinate frame."""
     rvec1, tvec1 = rvec1.reshape((3, 1)), tvec1.reshape((3,  1))
     rvec2, tvec2 = rvec2.reshape((3, 1)), tvec2.reshape((3, 1))
     # Inverse the second marker
@@ -392,6 +446,7 @@ def relativePosition(rvec1, tvec1, rvec2, tvec2):
 
 
 def plotCubeInWallFrame(cubeCornersWall):
+    """Display cube corners and wall references in a Matplotlib 3D diagnostic plot."""
     ax = plt.figure(figsize=(5,5)).add_subplot(projection='3d')
     # ax.set_box_aspect([1,1,1])
     #ax.set_aspect('equal')
@@ -403,6 +458,7 @@ def plotCubeInWallFrame(cubeCornersWall):
 
 
 def plotAxesOfCube(rvec,tvec,scale):
+    """Plot the transformed cube X/Y/Z axes in red, green, and blue."""
     axPts = np.array([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
     axPts = applyTformToCoords(rvec,tvec,axPts*scale)
     plt.plot([tvec[0], axPts[0,0]],[tvec[1], axPts[0,1]],[tvec[2], axPts[0,2]],'r')
@@ -411,13 +467,14 @@ def plotAxesOfCube(rvec,tvec,scale):
 
 
 def rotateMagVector(rvec, mag_vector):
-    # Rotating the magnetic vector to the global frame without applying physical translation
+    """Rotate a magnetic direction by a pose without applying translation."""
     R, _ = cv2.Rodrigues(rvec)
     rotated_vector = np.dot(R, mag_vector.T).T
     return rotated_vector
 
 
 def list_available_camera_indices(max_index=20, backend=cv2.CAP_DSHOW, require_frame=False):
+    """Return usable OpenCV camera indices, optionally requiring a readable frame."""
     available = []
     for idx in range(max_index + 1):
         cap = cv2.VideoCapture(idx, backend)
@@ -433,6 +490,7 @@ def list_available_camera_indices(max_index=20, backend=cv2.CAP_DSHOW, require_f
 
 
 def _read_cached_camera_index(cache_file):
+    """Read a previously successful camera index; return None if unavailable."""
     if not cache_file or not os.path.exists(cache_file):
         return None
 
@@ -444,6 +502,7 @@ def _read_cached_camera_index(cache_file):
 
 
 def _write_cached_camera_index(cache_file, cam_index):
+    """Persist a successful camera index without letting cache errors stop capture."""
     if not cache_file:
         return
 
@@ -458,6 +517,11 @@ def _write_cached_camera_index(cache_file, cam_index):
 
 
 def open_camera_reproducible(preferred_indices, frame_width=None, frame_height=None, backend=cv2.CAP_DSHOW, cache_file=None, warmup_reads=3):
+    """Open the first working preferred/cached camera after optional warm-up reads.
+
+    Returns ``(index, capture, tried_indices)``; index and capture are None when
+    no candidate supplies a valid frame.
+    """
     tried = []
     candidate_indices = []
 

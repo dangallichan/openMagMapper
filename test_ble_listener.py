@@ -1,3 +1,10 @@
+"""Command-line BLE diagnostic listener for the Nano 33 BLE sensor firmware.
+
+It scans for the advertised device (or connects to a supplied address), subscribes
+to its accelerometer, gyroscope, and magnetometer notifications, then prints the
+decoded values. It does not write data or control the board.
+"""
+
 import argparse
 import asyncio
 import struct
@@ -21,6 +28,7 @@ MAGMLX_UUID = "19B10004-E8F2-537E-4F6C-D104768A1214"
 
 
 def parse_accel_or_gyro(payload: bytearray):
+    """Decode the 12-byte, little-endian three-float IMU payload from firmware."""
     if len(payload) < 12:
         return None
     # Arduino writes native floats with memcpy; Nano 33 BLE is little-endian.
@@ -29,6 +37,7 @@ def parse_accel_or_gyro(payload: bytearray):
 
 
 def parse_mag(payload: bytearray):
+    """Decode the first three big-endian int16 values of the magnetometer payload."""
     if len(payload) < 6:
         return None
     # Firmware packs int16 as big-endian bytes.
@@ -37,6 +46,7 @@ def parse_mag(payload: bytearray):
 
 
 def format_ts(start_time: float) -> str:
+    """Format elapsed monotonic time so log entries can be compared safely."""
     dt = time.monotonic() - start_time
     return f"{dt:8.3f}s"
 
@@ -46,6 +56,7 @@ def normalize_ble_name(value: str) -> str:
 
 
 async def find_device(name: str, address: str, timeout: float):
+    """Return a requested address directly or scan for the first matching name."""
     if address:
         dev = await BleakScanner.find_device_by_address(address, timeout=timeout)
         if dev is not None:
@@ -171,6 +182,7 @@ async def run(args):
                     props = ",".join(char.properties)
                     print(f"    Char {char.uuid} ({props})")
 
+        # Notification callbacks run whenever the corresponding BLE characteristic updates.
         def on_accel(_sender, data):
             vals = parse_accel_or_gyro(data)
             if vals is None:
@@ -203,6 +215,7 @@ async def run(args):
             x, y, z = vals
             print(f"[{format_ts(start_time)}] MAGMLX x={x:6d} y={y:6d} z={z:6d}")
 
+        # Keep only successfully subscribed UUIDs so cleanup can be best-effort.
         subscribed = []
         pollers = []
 
@@ -338,6 +351,7 @@ async def run(args):
 
 
 def build_parser():
+    """Create the command-line interface used to choose and inspect a BLE device."""
     parser = argparse.ArgumentParser(
         description="Connect to openMagMapper BLE sensor and print live notifications."
     )
@@ -398,6 +412,7 @@ def build_parser():
 
 
 def main():
+    """Run the async listener and translate expected CLI errors into exit codes."""
     parser = build_parser()
     args = parser.parse_args()
 
