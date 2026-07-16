@@ -348,8 +348,8 @@ def build_parser():
     )
     parser.add_argument(
         "--address",
-        # default="42:D5:F4:FB:16:1C",
-        default="D1:A3:04:CC:25:EC",
+        default="42:D5:F4:FB:16:1C",
+        # default="D1:A3:04:CC:25:EC",
         # default="",
         help="BLE MAC/address to connect directly (skips scan)",
     )
