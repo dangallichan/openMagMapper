@@ -18,10 +18,19 @@ import ommFuncs as omm
 import ommFuncs_ble as omm_ble
 
 
-camNumber = 0 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
+# cameraName = 'POCO'
+cameraName = 'USBwebcam_JLC1080'
+# cameraName = 'USBwebcam_Yimona'
+
+baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
+cameraBackend = cv2.CAP_DSHOW
+cameraCacheFile = os.path.join(baseDir, 'data', 'camera_cache', f'{cameraName}_cam_index.txt')
+
+
+camNumber = 1 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
 if camNumber == -1:
     print("Scanning for available camera indices...")
-    scan_backend = cv2.CAP_DSHOW
+    scan_backend = cameraBackend
     available_indices = omm.list_available_camera_indices(max_index=10, backend=scan_backend, require_frame=False)
     if not available_indices:
         print("No cameras found in fast scan; retrying with slower frame validation...")
@@ -29,15 +38,22 @@ if camNumber == -1:
     print(f"Available camera indices (CAP_DSHOW): {available_indices}")
     raise SystemExit(0)
 
-camCapture = cv2.VideoCapture(camNumber)  
-
-
-# cameraName = 'POCO'
-cameraName = 'USBwebcam_JLC1080'
-# cameraName = 'USBwebcam_Yimona'
+selectedCamNumber, camCapture, triedCamIndices = omm.open_camera_reproducible(
+    preferred_indices=[camNumber],
+    frame_width=1280,
+    frame_height=720,
+    backend=cameraBackend,
+    cache_file=cameraCacheFile,
+    warmup_reads=2,
+)
+if camCapture is None:
+    print(f"Fast camera open failed for indices {triedCamIndices}; falling back to index {camNumber}.")
+    camCapture = cv2.VideoCapture(camNumber, cameraBackend)
+else:
+    camNumber = selectedCamNumber
+    print(f"Using camera index {camNumber} via CAP_DSHOW (tried {triedCamIndices}).")
 
 # Defining filenames:
-baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
 calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
 
 outputVideoDir = os.path.join(baseDir, 'data','experimentData')
@@ -647,7 +663,7 @@ while True:
         print(f"Error reading frame from camera number: {camNumber} - is it connected?")
         print("Available cameras:")
         for i in range(10):
-            cap = cv2.VideoCapture(i)
+            cap = cv2.VideoCapture(i, cameraBackend)
             if cap.isOpened():
                 print(f"  Camera index {i} is available")
                 cap.release()
