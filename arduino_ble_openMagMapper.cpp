@@ -5,11 +5,18 @@
 #include <Adafruit_MLX90395.h>
 #include <Wire.h>
 
-// BLE Service and Characteristics
-BLEService sensorService("180A");
-BLECharacteristic imuAccelChar("2A58", BLERead | BLENotify, 12);
-BLECharacteristic imuGyroChar("2A59", BLERead | BLENotify, 12);
-BLECharacteristic magnetometerChar("2A5B", BLERead | BLENotify, 12);
+// BLE Service and Characteristics (custom 128-bit UUIDs)
+const char* BLE_SERVICE_UUID = "19B10000-E8F2-537E-4F6C-D104768A1214";
+const char* BLE_ACCEL_UUID = "19B10001-E8F2-537E-4F6C-D104768A1214";
+const char* BLE_GYRO_UUID = "19B10002-E8F2-537E-4F6C-D104768A1214";
+const char* BLE_MAG_UUID = "19B10003-E8F2-537E-4F6C-D104768A1214";
+const char* BLE_MAGMLX_UUID = "19B10004-E8F2-537E-4F6C-D104768A1214";
+
+BLEService sensorService(BLE_SERVICE_UUID);
+BLECharacteristic imuAccelChar(BLE_ACCEL_UUID, BLERead | BLENotify, 12);
+BLECharacteristic imuGyroChar(BLE_GYRO_UUID, BLERead | BLENotify, 12);
+BLECharacteristic imuMagChar(BLE_MAG_UUID, BLERead | BLENotify, 12);
+BLECharacteristic mlxMagChar(BLE_MAGMLX_UUID, BLERead | BLENotify, 12);
 
 
 #define OPTIMAL_OSR MLX90395_OSR_8         // optimal OSR: 8 {1, 2, 4, 8}
@@ -24,7 +31,8 @@ unsigned long lastMlxReadWarnMs = 0;
 // Buffer for sensor data
 uint8_t imuAccelData[12];
 uint8_t imuGyroData[12];
-uint8_t magnetometerData[12];
+uint8_t imuMagData[12];
+uint8_t mlxMagData[12];
 
 void setup() {
   Serial.begin(115200);
@@ -57,9 +65,22 @@ void setup() {
   
   sensorService.addCharacteristic(imuAccelChar);
   sensorService.addCharacteristic(imuGyroChar);
-  sensorService.addCharacteristic(magnetometerChar);
+  sensorService.addCharacteristic(imuMagChar);
+  sensorService.addCharacteristic(mlxMagChar);
   
   BLE.addService(sensorService);
+
+  Serial.println("BLE UUID config:");
+  Serial.print("  Service: ");
+  Serial.println(BLE_SERVICE_UUID);
+  Serial.print("  Accel:   ");
+  Serial.println(BLE_ACCEL_UUID);
+  Serial.print("  Gyro:    ");
+  Serial.println(BLE_GYRO_UUID);
+  Serial.print("  Mag:     ");
+  Serial.println(BLE_MAG_UUID);
+  Serial.print("  MagMLX:  ");
+  Serial.println(BLE_MAGMLX_UUID);
   
   // Start advertising
   BLE.advertise();
@@ -78,6 +99,7 @@ void loop() {
       // Read IMU data
       float accelX, accelY, accelZ;
       float gyroX, gyroY, gyroZ;
+      float magX, magY, magZ;
       
       if (IMU.accelerationAvailable()) {
         IMU.readAcceleration(accelX, accelY, accelZ);
@@ -90,13 +112,19 @@ void loop() {
         packFloatData(imuGyroData, gyroX, gyroY, gyroZ);
         imuGyroChar.writeValue(imuGyroData, 12);
       }
+
+      if (IMU.magneticFieldAvailable()) {
+        IMU.readMagneticField(magX, magY, magZ);
+        packFloatData(imuMagData, magX, magY, magZ);
+        imuMagChar.writeValue(imuMagData, 12);
+      }
       
       // Read MLX90395 magnetometer data when available.
       if (mlxAvailable) {
-        int16_t magX, magY, magZ;
-        if (readMLX90395(magX, magY, magZ)) {
-          packInt16Data(magnetometerData, magX, magY, magZ);
-          magnetometerChar.writeValue(magnetometerData, 12);
+        int16_t mlxMagX, mlxMagY, mlxMagZ;
+        if (readMLX90395(mlxMagX, mlxMagY, mlxMagZ)) {
+          packInt16Data(mlxMagData, mlxMagX, mlxMagY, mlxMagZ);
+          mlxMagChar.writeValue(mlxMagData, 12);
         } else {
           // Throttle warning output to avoid spamming serial logs.
           unsigned long nowMs = millis();

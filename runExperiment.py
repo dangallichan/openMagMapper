@@ -1,12 +1,5 @@
-"""Real-time experiment program.
-
-Flow: read camera frames -> locate the cube and table ArUco boards -> read
-magnetometer serial data -> transform vectors into the table coordinate system
--> display overlays and save video/CSV output.
-"""
 # %%
-from collections import deque
-import numpy as np
+import numpy as np  
 import cv2          
 import cv2.aruco as aruco  
 import matplotlib.pyplot as plt
@@ -18,11 +11,11 @@ import csv
 import serial  # from pyserial package
 import serial.tools.list_ports
 from datetime import datetime
-
-from project_paths import CAMERA_NAME, CALIBRATION_FILE, EXPERIMENT_OUTPUT_DIR
+from collections import deque
 
 
 import ommFuncs as omm
+import ommFuncs_ble as omm_ble
 
 
 # Camera index: 0 is normally the default camera. Set to -1 to scan available
@@ -155,6 +148,7 @@ OVERLAY_ALPHA = 0.35
 STALE_VECTOR_TIMEOUT_SEC = 0.5
 AUTO_FREEZE_RATE_HZ = 3.0
 TRACE_LIVE_TIMEOUT_SEC = 0.5
+BLE_TRACE_LIVE_TIMEOUT_SEC = 1.5
 
 # OpenCV board coordinates and project geometry functions use metres; serial
 # magnetic-field strengths use microtesla (uT).
@@ -165,6 +159,16 @@ sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
 
 SER_TIMEOUT = 0  # non-blocking serial reads in the main video loop
 BAUDRATE = 115200
+# When enabled, the live magnetometer vector comes from BLE MAGMLX instead of the serial stream.
+USE_BLE_MAGMLX = True
+BLE_DEVICE_NAME = 'Nano33BLE_Sensor'
+# BLE_DEVICE_ADDRESS = '42:D5:F4:FB:16:1C'
+BLE_DEVICE_ADDRESS = 'D1:A3:04:CC:25:EC'
+BLE_SCAN_TIMEOUT = 20.0
+BLE_CONNECT_TIMEOUT = 10.0
+BLE_CONNECT_RETRIES = 3
+BLE_RETRY_DELAY = 2.0
+BLE_POLL_INTERVAL = 0.2
 # To manually override the port selection do something like this:
 # PORTNAME = "COM11"          ## Windows
 # PORTNAME =  "/dev/ttyUSB0"  ## Linux 
@@ -172,9 +176,8 @@ BAUDRATE = 115200
 # PORTNAME =  "/dev/tty.usbmodem12345"  ## Mac
 PORTNAME = None
 
-# If no port is specified, find an available serial port. If the wrong port is
-# selected, set PORTNAME above directly, for example to "COM11".
-if PORTNAME is None:
+# Attempt to automatically find the serial port
+if PORTNAME is None and not USE_BLE_MAGMLX:
     print("Attempting to find serial port.")
     print("If this fails, you can manually set the port in the script.")
     print("Also note that if you have multiple serial ports connected,")
@@ -182,16 +185,31 @@ if PORTNAME is None:
     PORTNAME = omm.getSerialPort()
 
 
-print("Opening %s at %u baud " % (PORTNAME, BAUDRATE))
-try:
-    ser = serial.Serial(PORTNAME, BAUDRATE, timeout=SER_TIMEOUT)
-    time.sleep(0.1)
-    ser.reset_input_buffer()
-except:
+bleMagSource = None
+if USE_BLE_MAGMLX:
+    print(f"Using BLE MAGMLX source from {BLE_DEVICE_NAME or BLE_DEVICE_ADDRESS or 'auto-detected device'}")
+    bleMagSource = omm_ble.BleMagmlxSource(
+        name=BLE_DEVICE_NAME,
+        address=BLE_DEVICE_ADDRESS,
+        scan_timeout=BLE_SCAN_TIMEOUT,
+        connect_timeout=BLE_CONNECT_TIMEOUT,
+        connect_retries=BLE_CONNECT_RETRIES,
+        retry_delay=BLE_RETRY_DELAY,
+        poll_interval=BLE_POLL_INTERVAL,
+    )
+    bleMagSource.start()
     ser = None
+else:
+    print("Opening %s at %u baud " % (PORTNAME, BAUDRATE))
+    try:
+        ser = serial.Serial(PORTNAME, BAUDRATE, timeout=SER_TIMEOUT)
+        time.sleep(0.1)
+        ser.reset_input_buffer()
+    except:
+        ser = None
 
-if not ser:
-    print("Can't open port")
+    if not ser:
+        print("Can't open port")
     
 
 
@@ -207,6 +225,8 @@ lastMagVectorPts = None
 lastMagUpdateTime = None
 lastMagMagnitudeUT = None
 lastMagRawVectorUT = None
+lastBleSequence = -1
+lastBleErrorText = None
 badSerialPacketCount = 0
 # Frozen vectors store their table-coordinate origin and unscaled vector, so
 # they can be reprojected from each current camera viewpoint.
@@ -311,53 +331,78 @@ while True:
                     2,
                 )
 
-        # check for USB data
-        line = None
+        # check for magnetometer data
         sensor_data_received = 0
         serial_values = np.full(10, np.nan, dtype=float)
         raw_serial_line = ''
         currentMagSampleUT = np.full(3, np.nan, dtype=float)
 
         try:
-            if ser and ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if USE_BLE_MAGMLX and bleMagSource is not None:
+                bleSnapshot = bleMagSource.snapshot()
+                if bleSnapshot is not None:
+                    bleMagVectorUT, bleTimestamp, bleSequence = bleSnapshot
+                    if bleSequence != lastBleSequence:
+                        lastBleSequence = bleSequence
+                        rawMagVectorUT = np.asarray(bleMagVectorUT, dtype=float).reshape(3)
+                        currentMagSampleUT = rawMagVectorUT.copy()
+                        lastTraceSampleUT = rawMagVectorUT.copy()
+                        scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
+                            rawMagVectorUT,
+                            baseViewScaleMPerUT,
+                            scale_multiplier=vectorScaleMultiplier,
+                            length_power=vectorLengthPower,
+                        )
+                        scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
 
-            if line:
-                # print(line)
-                newDataRow, parsedSerialLine = omm.parse_serial_packet(line)
-                if newDataRow is None or len(newDataRow) < 4:
-                    badSerialPacketCount += 1
-                    if badSerialPacketCount <= 5 or badSerialPacketCount % 100 == 0:
-                        print(f"Skipping malformed serial packet ({badSerialPacketCount}): {line}")
-                else:
-                    raw_serial_line = parsedSerialLine
-                    sensor_data_received = 1
-                    lastValidSerialDataTime = time.monotonic()
+                        # Keep the latest valid vector so rendering can continue through BLE gaps.
+                        lastMagRawVectorUT = rawMagVectorUT.copy()
+                        lastMagVectorPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
+                        lastMagUpdateTime = bleTimestamp if bleTimestamp is not None else time.monotonic()
+                        lastMagMagnitudeUT = magMagnitudeUT
+                        lastValidSerialDataTime = lastMagUpdateTime
+                        sensor_data_received = 1
+                        raw_serial_line = f"BLE_MAGMLX,{rawMagVectorUT[0]:.0f},{rawMagVectorUT[1]:.0f},{rawMagVectorUT[2]:.0f}"
+                        serial_values[0] = np.nan
+                        serial_values[1:4] = rawMagVectorUT[:3]
+            else:
+                line = None
+                if ser and ser.in_waiting > 0:
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
 
-                    # Items 1-3 are Bx/By/Bz in the sensor's own coordinate system (uT).
-                    rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
-                    currentMagSampleUT = rawMagVectorUT.copy()
-                    lastTraceSampleUT = rawMagVectorUT.copy()
-                    scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
-                        rawMagVectorUT,
-                        baseViewScaleMPerUT,
-                        scale_multiplier=vectorScaleMultiplier,
-                        length_power=vectorLengthPower,
-                    )
-                    # Scale the display length to metres, then rotate it before adding it
-                    # to the board88 geometric position.
-                    scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+                if line:
+                    # print(line)
+                    newDataRow, parsedSerialLine = omm.parse_serial_packet(line)
+                    if newDataRow is None or len(newDataRow) < 4:
+                        badSerialPacketCount += 1
+                        if badSerialPacketCount <= 5 or badSerialPacketCount % 100 == 0:
+                            print(f"Skipping malformed serial packet ({badSerialPacketCount}): {line}")
+                    else:
+                        raw_serial_line = parsedSerialLine
+                        sensor_data_received = 1
+                        lastValidSerialDataTime = time.monotonic()
 
-                    # Keep the latest valid vector so rendering can continue through serial gaps.
-                    lastMagRawVectorUT = rawMagVectorUT.copy()
-                    lastMagVectorPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
-                    lastMagUpdateTime = time.monotonic()
-                    lastMagMagnitudeUT = magMagnitudeUT
+                        rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
+                        currentMagSampleUT = rawMagVectorUT.copy()
+                        lastTraceSampleUT = rawMagVectorUT.copy()
+                        scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
+                            rawMagVectorUT,
+                            baseViewScaleMPerUT,
+                            scale_multiplier=vectorScaleMultiplier,
+                            length_power=vectorLengthPower,
+                        )
+                        scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
 
-                    serial_values[:min(len(newDataRow), 10)] = newDataRow[:10]
+                        # Keep the latest valid vector so rendering can continue through serial gaps.
+                        lastMagRawVectorUT = rawMagVectorUT.copy()
+                        lastMagVectorPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
+                        lastMagUpdateTime = time.monotonic()
+                        lastMagMagnitudeUT = magMagnitudeUT
+
+                        serial_values[:min(len(newDataRow), 10)] = newDataRow[:10]
 
         except Exception as e:
-            print("Error reading from serial port:", e)
+            print("Error reading magnetometer data:", e)
 
         traceSampleUT = currentMagSampleUT if sensor_data_received else lastTraceSampleUT
         mxHistory.append(float(traceSampleUT[0]))
@@ -459,7 +504,14 @@ while True:
             trace_stale_seconds = None
         else:
             trace_stale_seconds = time.monotonic() - lastValidSerialDataTime
-            trace_status = 'LIVE' if trace_stale_seconds <= TRACE_LIVE_TIMEOUT_SEC else 'STALE'
+            live_timeout = BLE_TRACE_LIVE_TIMEOUT_SEC if USE_BLE_MAGMLX else TRACE_LIVE_TIMEOUT_SEC
+            trace_status = 'LIVE' if trace_stale_seconds <= live_timeout else 'STALE'
+
+        if USE_BLE_MAGMLX and bleMagSource is not None and bleMagSource.last_error is not None:
+            current_ble_error = str(bleMagSource.last_error)
+            if current_ble_error != lastBleErrorText:
+                print(f"BLE reader warning: {current_ble_error}")
+                lastBleErrorText = current_ble_error
 
         colorFrame = omm.draw_component_trace(
             colorFrame,
@@ -578,4 +630,6 @@ camCapture.release()
 out.release()
 dataFileHandle.close()
 frozenVectorsFileHandle.close()
+if bleMagSource is not None:
+    bleMagSource.stop()
 cv2.destroyAllWindows()
