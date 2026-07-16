@@ -1,7 +1,7 @@
 // This code generated purely by AI and hasn't been tested yet
 
 #include <ArduinoBLE.h>
-#include <Arduino_LSM6DSOX.h>
+#include <Arduino_LSM9DS1.h>
 #include <Adafruit_MLX90395.h>
 #include <Wire.h>
 
@@ -11,7 +11,15 @@ BLECharacteristic imuAccelChar("2A58", BLERead | BLENotify, 12);
 BLECharacteristic imuGyroChar("2A59", BLERead | BLENotify, 12);
 BLECharacteristic magnetometerChar("2A5B", BLERead | BLENotify, 12);
 
+
+#define OPTIMAL_OSR MLX90395_OSR_8         // optimal OSR: 8 {1, 2, 4, 8}
+#define OPTIMAL_RESOLUTION MLX90395_RES_19 // optimal resolution: 19 {16, 17, 18, 19}
+#define OPTIMAL_GAIN_SELECTION 7           // optimal gainSel: 7 {0-15}
+
+
 Adafruit_MLX90395 mlx;
+bool mlxAvailable = false;
+unsigned long lastMlxReadWarnMs = 0;
 
 // Buffer for sensor data
 uint8_t imuAccelData[12];
@@ -31,10 +39,10 @@ void setup() {
     while (1);
   }
   
-  // Initialize MLX90395
-  if (!initMLX90395()) {
-    Serial.println("Failed to initialize MLX90395!");
-    while (1);
+  // Initialize MLX90395 (optional)
+  mlxAvailable = initMLX90395();
+  if (!mlxAvailable) {
+    Serial.println("Warning: MLX90395 not detected, continuing without magnetometer data.");
   }
   
   // Initialize BLE
@@ -83,11 +91,20 @@ void loop() {
         imuGyroChar.writeValue(imuGyroData, 12);
       }
       
-      // Read MLX90395 magnetometer data
-      int16_t magX, magY, magZ;
-      if (readMLX90395(magX, magY, magZ)) {
-        packInt16Data(magnetometerData, magX, magY, magZ);
-        magnetometerChar.writeValue(magnetometerData, 12);
+      // Read MLX90395 magnetometer data when available.
+      if (mlxAvailable) {
+        int16_t magX, magY, magZ;
+        if (readMLX90395(magX, magY, magZ)) {
+          packInt16Data(magnetometerData, magX, magY, magZ);
+          magnetometerChar.writeValue(magnetometerData, 12);
+        } else {
+          // Throttle warning output to avoid spamming serial logs.
+          unsigned long nowMs = millis();
+          if (nowMs - lastMlxReadWarnMs >= 1000) {
+            Serial.println("Warning: MLX90395 read failed.");
+            lastMlxReadWarnMs = nowMs;
+          }
+        }
       }
       
       delay(100); // Update rate: 10 Hz
@@ -102,12 +119,10 @@ bool initMLX90395() {
     return false;
   }
 
-  mlx.setOSR(MLX90395_OSR_3);
-  mlx.setFilter(MLX90395_FILTER_5);
-  mlx.setResolution(MLX90395_X, MLX90395_RES_19);
-  mlx.setResolution(MLX90395_Y, MLX90395_RES_19);
-  mlx.setResolution(MLX90395_Z, MLX90395_RES_16);
-
+  mlx.setOSR(OPTIMAL_OSR);
+  mlx.setGain(OPTIMAL_GAIN_SELECTION);
+  mlx.setResolution(OPTIMAL_RESOLUTION);
+  
   return true;
 }
 

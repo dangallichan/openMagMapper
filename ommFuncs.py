@@ -273,7 +273,7 @@ def board_vector_to_table(vec_board, rvec_board, rvec_table):
     return (r_board_to_table @ vec_board.reshape(3, 1)).reshape(3)
 
 
-def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_wh):
+def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_wh, status='NO DATA', stale_seconds=None):
     x0, y0 = origin_xy
     w, h = size_wh
     if w <= 2 or h <= 2:
@@ -323,6 +323,22 @@ def draw_component_trace(img, history_x, history_y, history_z, origin_xy, size_w
     draw_series(comp_arrays[0], (0, 0, 255))
     draw_series(comp_arrays[1], (0, 255, 0))
     draw_series(comp_arrays[2], (255, 0, 0))
+
+    status_norm = str(status).strip().upper()
+    if status_norm == 'LIVE':
+        status_text = 'LIVE'
+        status_color = (0, 220, 0)
+    elif status_norm == 'STALE':
+        if stale_seconds is not None and np.isfinite(stale_seconds):
+            status_text = f'STALE {float(stale_seconds):.1f}s'
+        else:
+            status_text = 'STALE'
+        status_color = (0, 165, 255)
+    else:
+        status_text = 'NO DATA'
+        status_color = (180, 180, 180)
+
+    cv2.putText(img, status_text, (x0 + w - 120, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 1, cv2.LINE_AA)
 
     cv2.putText(img, "mx", (x0 + 8, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
     cv2.putText(img, "my", (x0 + 40, y0 + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)

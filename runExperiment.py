@@ -15,7 +15,7 @@ import pandas as pd
 from mpl_toolkits.mplot3d import Axes3D
 import os, sys, time
 import csv
-import serial
+import serial  # from pyserial package
 import serial.tools.list_ports
 from datetime import datetime
 
@@ -103,8 +103,6 @@ out = cv2.VideoWriter(outputVideoFile, fourcc, frameRate, (frameWidth, frameHeig
 
 dataFileHandle = open(outputDataFile, 'w', newline='')
 dataWriter = csv.writer(dataFileHandle)
-# Write one row per frame. Frames without serial data retain NaN values, making
-# the CSV straightforward to align with the video later.
 dataWriter.writerow([
     'host_timestamp_iso',
     'host_time_monotonic_s',
@@ -156,6 +154,7 @@ print(f"Saving frozen vectors to {outputFrozenVectorsFile}")
 OVERLAY_ALPHA = 0.35
 STALE_VECTOR_TIMEOUT_SEC = 0.5
 AUTO_FREEZE_RATE_HZ = 3.0
+TRACE_LIVE_TIMEOUT_SEC = 0.5
 
 # OpenCV board coordinates and project geometry functions use metres; serial
 # magnetic-field strengths use microtesla (uT).
@@ -215,24 +214,25 @@ frozenVectorsTable = []
 autoFreezeEnabled = False
 nextAutoFreezeTime = 0.0
 
-baseViewScaleMPerUT = 5e-2 / 1000.0
+baseViewScaleMPerUT = 15e-2 / 1000.0
 vectorScaleMultiplier = 1.0
-vectorLengthPower = 1.0
+vectorLengthPower = 0.5
 vectorScaleStep = 1.15
 vectorPowerStep = 0.1
 traceHistoryLen = 240
 mxHistory = deque(maxlen=traceHistoryLen)
 myHistory = deque(maxlen=traceHistoryLen)
 mzHistory = deque(maxlen=traceHistoryLen)
-# --- Main loop: one iteration per camera frame -----------------------------
-# Press q to exit; other key controls are handled at the end of the loop.
+lastTraceSampleUT = np.full(3, np.nan, dtype=float)
+lastValidSerialDataTime = None
+# Capture live webcam images until 'q' is pressed
 while True:
 
     ret, frame = camCapture.read()    
 
     if ret == True:
         iFrame += 1
-        # ArUco detection uses grayscale; convert back to colour for overlays.
+        # convert to b&w for underlay and detection
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # Detect the markers
         corners, ids, rejectedImgPoints = omm.detector.detectMarkers(frame)
@@ -242,7 +242,7 @@ while True:
         # draw on all detected markers in scene
         overlayFrame = cv2.aruco.drawDetectedMarkers(overlayFrame, corners, ids)
 
-        # Locate board88 to obtain its rotation and translation relative to the camera.
+        # detect the cube board and draw the cube if detected
         rvec88, tvec88, retval88 = omm.detectBoard(board88, omm.detector, corners, ids, camera_matrix, dist_coeffs)        
               
         if retval88:
@@ -260,7 +260,7 @@ while True:
             imgpts,_ = cv2.projectPoints(cubePointsProj, rvec88, tvec88, camera_matrix, dist_coeffs)
             overlayFrame = omm.drawBox(overlayFrame, imgpts, (0,0,160))
 
-        # Locate the table board, which defines the experiment's global reference frame.
+        # detect the table board and draw the wall if detected
         rvecTable, tvecTable, retvalTable = omm.detectBoard(tableboard, omm.detector, corners, ids, camera_matrix, dist_coeffs)
         if retvalTable:
             overlayFrame = omm.safe_draw_frame_axes(overlayFrame, camera_matrix, dist_coeffs, rvecTable, tvecTable, 0.1)
@@ -297,7 +297,8 @@ while True:
                     scale_multiplier=vectorScaleMultiplier,
                     length_power=vectorLengthPower,
                 )
-                frozen_draw_pts = np.vstack((origin_table_m, origin_table_m + scaled_vec_table_m)).astype(np.float32)
+                half_vec = 0.5 * scaled_vec_table_m
+                frozen_draw_pts = np.vstack((origin_table_m - half_vec, origin_table_m + half_vec)).astype(np.float32)
                 imgptsFrozen, _ = cv2.projectPoints(frozen_draw_pts, rvecTable, tvecTable, camera_matrix, dist_coeffs)
                 imgptsFrozen[imgptsFrozen >= 1e6] = 1e6
                 imgptsFrozen[imgptsFrozen <= -1e6] = -1e6
@@ -310,8 +311,7 @@ while True:
                     2,
                 )
 
-        # --- Read one serial-data line --------------------------------------
-        # Non-blocking reads prevent a missing sensor sample from stalling video capture.
+        # check for USB data
         line = None
         sensor_data_received = 0
         serial_values = np.full(10, np.nan, dtype=float)
@@ -332,10 +332,12 @@ while True:
                 else:
                     raw_serial_line = parsedSerialLine
                     sensor_data_received = 1
+                    lastValidSerialDataTime = time.monotonic()
 
                     # Items 1-3 are Bx/By/Bz in the sensor's own coordinate system (uT).
                     rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
                     currentMagSampleUT = rawMagVectorUT.copy()
+                    lastTraceSampleUT = rawMagVectorUT.copy()
                     scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
                         rawMagVectorUT,
                         baseViewScaleMPerUT,
@@ -357,9 +359,10 @@ while True:
         except Exception as e:
             print("Error reading from serial port:", e)
 
-        mxHistory.append(float(currentMagSampleUT[0]))
-        myHistory.append(float(currentMagSampleUT[1]))
-        mzHistory.append(float(currentMagSampleUT[2]))
+        traceSampleUT = currentMagSampleUT if sensor_data_received else lastTraceSampleUT
+        mxHistory.append(float(traceSampleUT[0]))
+        myHistory.append(float(traceSampleUT[1]))
+        mzHistory.append(float(traceSampleUT[2]))
 
         host_time_iso = datetime.now().isoformat(timespec='milliseconds')
         host_time_monotonic = time.monotonic()
@@ -451,7 +454,23 @@ while True:
         trace_h = 150
         trace_x = 20
         trace_y = max(20, frameHeight - trace_h - 20)
-        colorFrame = omm.draw_component_trace(colorFrame, mxHistory, myHistory, mzHistory, (trace_x, trace_y), (trace_w, trace_h))
+        if lastValidSerialDataTime is None:
+            trace_status = 'NO DATA'
+            trace_stale_seconds = None
+        else:
+            trace_stale_seconds = time.monotonic() - lastValidSerialDataTime
+            trace_status = 'LIVE' if trace_stale_seconds <= TRACE_LIVE_TIMEOUT_SEC else 'STALE'
+
+        colorFrame = omm.draw_component_trace(
+            colorFrame,
+            mxHistory,
+            myHistory,
+            mzHistory,
+            (trace_x, trace_y),
+            (trace_w, trace_h),
+            status=trace_status,
+            stale_seconds=trace_stale_seconds,
+        )
 
         frozen_count_text = f"Frozen vectors: {len(frozenVectorsTable)}"
         cv2.putText(colorFrame, frozen_count_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)

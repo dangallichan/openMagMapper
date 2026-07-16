@@ -1,3 +1,5 @@
+# Quick script to capture frames using the same OpenCV setup as runExperiment.py, for camera calibration purposes.
+
 import argparse
 import os
 import time
