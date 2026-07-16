@@ -3,9 +3,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-fullPathToVideo = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_POCO\POCO_calibrationVideo_2026_06_26.mp4"
-videoOutDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_POCO\calib_frames"
-saveDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_POCO"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from project_paths import CALIBRATION_FRAME_DIR, CALIBRATION_VIDEO, VIDEO_CALIBRATION_DIR
+
+fullPathToVideo = str(CALIBRATION_VIDEO)
+videoOutDir = str(CALIBRATION_FRAME_DIR)
+saveDir = str(VIDEO_CALIBRATION_DIR)
 
 script_path = Path(__file__).with_name("calibrate_checkerboard.py")
 cmd = [

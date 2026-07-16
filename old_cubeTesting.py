@@ -151,7 +151,7 @@ magdata = os.path.join(dir_path,'../katieDev/USBwebcam/magnetic_field_data')
 
 ## load camera matrix from calibration
 #calibrationDir = 'C://Users//scedg10//OneDrive - Cardiff University//python//magMapper//calibrationIms_DanWebcam'
-data = np.load(os.path.join(calibrationDir,'calibration.npz'))
+data = np.load(os.path.join(calibrationDir,'calibration_1280x720.npz'))
 camera_matrix = data['camMatrix']
 dist_coeffs = data['distCoeff']
 print(camera_matrix)

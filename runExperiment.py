@@ -1,5 +1,12 @@
+"""Real-time experiment program.
+
+Flow: read camera frames -> locate the cube and table ArUco boards -> read
+magnetometer serial data -> transform vectors into the table coordinate system
+-> display overlays and save video/CSV output.
+"""
 # %%
-import numpy as np  
+from collections import deque
+import numpy as np
 import cv2          
 import cv2.aruco as aruco  
 import matplotlib.pyplot as plt
@@ -11,13 +18,16 @@ import csv
 import serial
 import serial.tools.list_ports
 from datetime import datetime
-from collections import deque
+
+from project_paths import CAMERA_NAME, CALIBRATION_FILE, EXPERIMENT_OUTPUT_DIR
 
 
 import ommFuncs as omm
 
 
-camNumber = 0 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
+# Camera index: 0 is normally the default camera. Set to -1 to scan available
+# cameras only, without starting an experiment.
+camNumber = 1
 if camNumber == -1:
     print("Scanning for available camera indices...")
     scan_backend = cv2.CAP_DSHOW
@@ -28,23 +38,16 @@ if camNumber == -1:
     print(f"Available camera indices (CAP_DSHOW): {available_indices}")
     raise SystemExit(0)
 
-camCapture = cv2.VideoCapture(camNumber)  
+camCapture = cv2.VideoCapture(camNumber)
 
 
-# cameraName = 'POCO'
-# cameraName = 'USBwebcam_JLC1080'
-cameraName = 'USBwebcam_Yimona'
+# Configure the camera and all project paths in project_paths.py.
+cameraName = CAMERA_NAME
 
-# Defining filenames:
-baseDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper"
-# if cameraName == 'POCO':
-#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
-# elif cameraName == 'USBwebcam_JLC1080':
-#     # calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1920x1080.npz')
-#     calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
-calibrationFile = os.path.join(baseDir, 'cameraCalibration', f'calibration_{cameraName}', f'calibration_1280x720.npz')
-
-outputVideoDir = os.path.join(baseDir, 'data','experimentData')
+# A timestamp gives each run separate video, per-frame data, and frozen-vector
+# files, preventing previous experiments from being overwritten.
+calibrationFile = str(CALIBRATION_FILE)
+outputVideoDir = str(EXPERIMENT_OUTPUT_DIR)
 os.makedirs(outputVideoDir, exist_ok=True)
 
 recordingStart = datetime.now()
@@ -54,17 +57,17 @@ outputDataFile = os.path.join(outputVideoDir, f'Exp_cam_outputData_{cameraName}_
 outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{cameraName}_{recordingTimestamp}.csv')
 
 
-# Aruco tracking, building wallboard and cube, camera calibration, folder paths
+# --- Spatial models and camera calibration ---------------------------------
+# board88 is the cube board carrying the sensor; tableboard is the desk reference
+# coordinate system. Final positions and magnetic vectors are converted to it.
 
 
 board88, cubePointsProj, markerWidthCube, cubeWidth = omm.getCubeBoard('board88_52mm')
 # tableboard, tablePointsProj = omm.getTableBoard('dansDesk')
 tableboard, tablePointsProj = omm.getTableBoard('table94')
 
-sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # offset in mm (x, y, z) of sensor relative to board88
-sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
-# sensor_rotation_deg = np.array([0.0, -90.0, 90.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
-
+sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # Sensor position relative to the board88 origin, in millimetres.
+sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # Sensor axes relative to board88 axes as XYZ Euler angles, in degrees.
 
 
 # cv2.projectPoints expects object points in Nx3 (or Nx1x3) float format.
@@ -72,7 +75,8 @@ sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relati
 arucoIDs_all = np.concatenate((tableboard.getIds(), board88.getIds()), axis=0)
 
 
-## load camera matrix from calibration
+# The calibration file provides camera intrinsics and distortion coefficients,
+# required for ArUco pose estimation and 3D point projection.
 data = np.load(calibrationFile)
 camera_matrix = data['camera_matrix']
 dist_coeffs = data['dist_coeffs']
@@ -80,6 +84,8 @@ dist_coeffs = data['dist_coeffs']
 # %%
 
 
+# --- Output files and hardware setup ---------------------------------------
+# This resolution must match the calibration resolution in calibration_1280x720.npz.
 frameWidth = 1280
 frameHeight = 720
 
@@ -97,6 +103,8 @@ out = cv2.VideoWriter(outputVideoFile, fourcc, frameRate, (frameWidth, frameHeig
 
 dataFileHandle = open(outputDataFile, 'w', newline='')
 dataWriter = csv.writer(dataFileHandle)
+# Write one row per frame. Frames without serial data retain NaN values, making
+# the CSV straightforward to align with the video later.
 dataWriter.writerow([
     'host_timestamp_iso',
     'host_time_monotonic_s',
@@ -125,6 +133,8 @@ dataWriter.writerow([
 
 frozenVectorsFileHandle = open(outputFrozenVectorsFile, 'w', newline='')
 frozenVectorsWriter = csv.writer(frozenVectorsFileHandle)
+# A frozen vector is a user-confirmed vector at a specific instant; this CSV
+# records only those confirmed vectors.
 frozenVectorsWriter.writerow([
     'freeze_index',
     'host_timestamp_iso',
@@ -141,12 +151,17 @@ print(f"Saving video to {outputVideoFile}")
 print(f"Saving data to {outputDataFile}")
 print(f"Saving frozen vectors to {outputFrozenVectorsFile}")
 
-# Alpha used to soften all overlay drawings (markers, axes, box, crosses, arrow) - except for mag vector
+# --- Display, coordinate transforms, and serial settings -------------------
+# ArUco markers/axes are translucent; magnetic arrows remain opaque for clarity.
 OVERLAY_ALPHA = 0.35
 STALE_VECTOR_TIMEOUT_SEC = 0.5
 AUTO_FREEZE_RATE_HZ = 3.0
 
+# OpenCV board coordinates and project geometry functions use metres; serial
+# magnetic-field strengths use microtesla (uT).
 sensor_offset_m = sensor_offset_mm / 1000.0
+# Rotates sensor-coordinate vectors into board88 coordinates. Vector conversion
+# uses its transpose (the inverse rotation).
 sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
 
 SER_TIMEOUT = 0  # non-blocking serial reads in the main video loop
@@ -158,7 +173,8 @@ BAUDRATE = 115200
 # PORTNAME =  "/dev/tty.usbmodem12345"  ## Mac
 PORTNAME = None
 
-# Attempt to automatically find the serial port
+# If no port is specified, find an available serial port. If the wrong port is
+# selected, set PORTNAME above directly, for example to "COM11".
 if PORTNAME is None:
     print("Attempting to find serial port.")
     print("If this fails, you can manually set the port in the script.")
@@ -184,12 +200,17 @@ if not ser:
 
 
 # %%
+# --- Runtime state ----------------------------------------------------------
+# lastMag* stores the most recent valid magnetic reading so the arrow remains
+# visible during brief gaps in serial input.
 iFrame = -1
 lastMagVectorPts = None
 lastMagUpdateTime = None
 lastMagMagnitudeUT = None
 lastMagRawVectorUT = None
 badSerialPacketCount = 0
+# Frozen vectors store their table-coordinate origin and unscaled vector, so
+# they can be reprojected from each current camera viewpoint.
 frozenVectorsTable = []
 autoFreezeEnabled = False
 nextAutoFreezeTime = 0.0
@@ -203,14 +224,15 @@ traceHistoryLen = 240
 mxHistory = deque(maxlen=traceHistoryLen)
 myHistory = deque(maxlen=traceHistoryLen)
 mzHistory = deque(maxlen=traceHistoryLen)
-# Capture live webcam images until 'q' is pressed
+# --- Main loop: one iteration per camera frame -----------------------------
+# Press q to exit; other key controls are handled at the end of the loop.
 while True:
 
     ret, frame = camCapture.read()    
 
     if ret == True:
         iFrame += 1
-        # convert to b&w for underlay and detection
+        # ArUco detection uses grayscale; convert back to colour for overlays.
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # Detect the markers
         corners, ids, rejectedImgPoints = omm.detector.detectMarkers(frame)
@@ -220,7 +242,7 @@ while True:
         # draw on all detected markers in scene
         overlayFrame = cv2.aruco.drawDetectedMarkers(overlayFrame, corners, ids)
 
-        # detect the cube board and draw the cube if detected
+        # Locate board88 to obtain its rotation and translation relative to the camera.
         rvec88, tvec88, retval88 = omm.detectBoard(board88, omm.detector, corners, ids, camera_matrix, dist_coeffs)        
               
         if retval88:
@@ -238,7 +260,7 @@ while True:
             imgpts,_ = cv2.projectPoints(cubePointsProj, rvec88, tvec88, camera_matrix, dist_coeffs)
             overlayFrame = omm.drawBox(overlayFrame, imgpts, (0,0,160))
 
-        # detect the table board and draw the wall if detected
+        # Locate the table board, which defines the experiment's global reference frame.
         rvecTable, tvecTable, retvalTable = omm.detectBoard(tableboard, omm.detector, corners, ids, camera_matrix, dist_coeffs)
         if retvalTable:
             overlayFrame = omm.safe_draw_frame_axes(overlayFrame, camera_matrix, dist_coeffs, rvecTable, tvecTable, 0.1)
@@ -265,6 +287,7 @@ while True:
                 frozen_min_strength = np.nan
                 frozen_max_strength = np.nan
 
+            # Reproject each frozen vector from table 3D coordinates into this camera frame.
             for frozenVecTable in frozenVectorsTable:
                 origin_table_m = np.asarray(frozenVecTable['origin_table_m'], dtype=float).reshape(3)
                 raw_vec_table_ut = np.asarray(frozenVecTable['raw_vec_table_ut'], dtype=float).reshape(3)
@@ -287,7 +310,8 @@ while True:
                     2,
                 )
 
-        # check for USB data
+        # --- Read one serial-data line --------------------------------------
+        # Non-blocking reads prevent a missing sensor sample from stalling video capture.
         line = None
         sensor_data_received = 0
         serial_values = np.full(10, np.nan, dtype=float)
@@ -309,6 +333,7 @@ while True:
                     raw_serial_line = parsedSerialLine
                     sensor_data_received = 1
 
+                    # Items 1-3 are Bx/By/Bz in the sensor's own coordinate system (uT).
                     rawMagVectorUT = np.asarray(newDataRow[1:4], dtype=float).reshape(3)
                     currentMagSampleUT = rawMagVectorUT.copy()
                     scaledMagVectorSensorM, magMagnitudeUT = omm.scale_magnetic_vector(
@@ -317,7 +342,9 @@ while True:
                         scale_multiplier=vectorScaleMultiplier,
                         length_power=vectorLengthPower,
                     )
-                    scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
+                    # Scale the display length to metres, then rotate it before adding it
+                    # to the board88 geometric position.
+                    scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
 
                     # Keep the latest valid vector so rendering can continue through serial gaps.
                     lastMagRawVectorUT = rawMagVectorUT.copy()
@@ -339,6 +366,9 @@ while True:
         sensor_table_values = np.full(3, np.nan, dtype=float)
         mag_table_values = np.full(3, np.nan, dtype=float)
 
+        # When both boards are visible, transform the sensor origin and vector endpoint
+        # from board88 into table coordinates. CSV stores the original vector (uT), not
+        # the scaled vector used only for display.
         if lastMagRawVectorUT is not None and retval88 and retvalTable:
             scaledMagVectorSensorM, _ = omm.scale_magnetic_vector(
                 lastMagRawVectorUT,
@@ -346,7 +376,7 @@ while True:
                 scale_multiplier=vectorScaleMultiplier,
                 length_power=vectorLengthPower,
             )
-            scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
+            scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
             currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
             magVectorTablePts = omm.transform_points_between_frames(currentMagVectorBoardPts, rvec88, tvec88, rvecTable, tvecTable)
             sensor_table_values, mag_table_values = omm.split_sensor_origin_and_mag_vector(magVectorTablePts)
@@ -377,6 +407,8 @@ while True:
             int(retval88),
         ])
 
+        # board88 alone is sufficient to draw the magnetic arrow. Use a darker colour
+        # when the latest reading exceeds the stale-data timeout.
         if lastMagRawVectorUT is not None and retval88:
             is_stale = lastMagUpdateTime is not None and (time.monotonic() - lastMagUpdateTime) > STALE_VECTOR_TIMEOUT_SEC
             try:
@@ -386,7 +418,7 @@ while True:
                     scale_multiplier=vectorScaleMultiplier,
                     length_power=vectorLengthPower,
                 )
-                scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
+                scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
                 currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
                 imgpts,_ = cv2.projectPoints(currentMagVectorBoardPts, rvec88, tvec88, camera_matrix, dist_coeffs)
                 imgpts[imgpts >= 1e6] = 1e6  # try to handle outlier large magnitudes...
@@ -424,11 +456,12 @@ while True:
         frozen_count_text = f"Frozen vectors: {len(frozenVectorsTable)}"
         cv2.putText(colorFrame, frozen_count_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)
 
+        # Auto-freeze records the current table-coordinate magnetic vector at a fixed rate.
         if autoFreezeEnabled:
             now_mono = time.monotonic()
             if now_mono >= nextAutoFreezeTime:
                 if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                    rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
+                    rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
                     frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                     frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                     frozenVectorsTable.append({
@@ -464,9 +497,11 @@ while True:
             else:
                 print("Auto-freeze disabled.")
 
+        # Space manually freezes the current vector. Both boards must be visible to obtain
+        # reliable table coordinates.
         if key == ord(' '):
             if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
+                rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
                 frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                 frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                 frozenVectorsTable.append({
@@ -519,6 +554,7 @@ while True:
         break            
 
 
+# Release camera, video, and CSV file resources after the loop exits.
 camCapture.release()
 out.release()
 dataFileHandle.close()

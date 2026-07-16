@@ -2,7 +2,12 @@ import numpy as np
 import cv2 as cv
 import glob
 import os 
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from project_paths import CALIBRATION_IMAGE_DIR, CALIBRATION_OUTPUT_DIR
 
 
 # Read Image
@@ -14,9 +19,8 @@ import matplotlib.pyplot as plt
 # outDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_POCO"
 
 
-calibrationDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam_Yimona\calib_images"
-outDir = r"C:\Users\scedg10\OneDrive - Cardiff University\projects\openMagMapper\cameraCalibration\calibration_USBwebcam_Yimona"
-
+calibrationDir = str(CALIBRATION_IMAGE_DIR)
+outDir = str(CALIBRATION_OUTPUT_DIR)
 
 
 # imgPathList = glob.glob(os.path.join(calibrationDir,'*.JPG'))
@@ -77,7 +81,7 @@ print("Reproj Error (pixels): {:.4f}".format(repError))
 
 
 # Save Calibration Parameters (later video)
-paramPath = os.path.join(outDir,'calibration.npz')
+paramPath = os.path.join(outDir,'calibration_1280x720.npz')
 np.savez(paramPath, 
     repError=repError, 
     camera_matrix=camera_matrix, 
