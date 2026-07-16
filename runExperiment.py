@@ -59,8 +59,10 @@ board88, cubePointsProj, markerWidthCube, cubeWidth = omm.getCubeBoard('board88_
 # tableboard, tablePointsProj = omm.getTableBoard('dansDesk')
 tableboard, tablePointsProj = omm.getTableBoard('table94')
 
-sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # Sensor position relative to the board88 origin, in millimetres.
-sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # Sensor axes relative to board88 axes as XYZ Euler angles, in degrees.
+sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # offset in mm (x, y, z) of sensor relative to board88
+sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
+# sensor_rotation_deg = np.array([0.0, -90.0, 90.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
+
 
 
 # cv2.projectPoints expects object points in Nx3 (or Nx1x3) float format.
@@ -124,8 +126,6 @@ dataWriter.writerow([
 
 frozenVectorsFileHandle = open(outputFrozenVectorsFile, 'w', newline='')
 frozenVectorsWriter = csv.writer(frozenVectorsFileHandle)
-# A frozen vector is a user-confirmed vector at a specific instant; this CSV
-# records only those confirmed vectors.
 frozenVectorsWriter.writerow([
     'freeze_index',
     'host_timestamp_iso',
@@ -161,10 +161,10 @@ sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
 SER_TIMEOUT = 0  # non-blocking serial reads in the main video loop
 BAUDRATE = 115200
 # When enabled, the live magnetometer vector comes from BLE MAGMLX instead of the serial stream.
-USE_BLE_MAGMLX = True
+USE_BLE_MAGMLX = False
 BLE_DEVICE_NAME = 'Nano33BLE_Sensor'
 # BLE_DEVICE_ADDRESS = '42:D5:F4:FB:16:1C'
-BLE_DEVICE_ADDRESS = 'D1:A3:04:CC:25:EC'
+BLE_DEVICE_ADDRESS = 'D1:A3:04:CC:25:EC'  
 BLE_SCAN_TIMEOUT = 20.0
 BLE_CONNECT_TIMEOUT = 10.0
 BLE_CONNECT_RETRIES = 3

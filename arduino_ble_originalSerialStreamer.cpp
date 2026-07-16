@@ -11,6 +11,7 @@
 
 float ax, ay, az, gx, gy, gz; // for accel and gyro data
 
+float NPARS = 3; // number of parameters to print: 3 for mag only, 9 for mag+accel+gyro
 
 Adafruit_MLX90395 sensor = Adafruit_MLX90395();
 void setup(void)
@@ -85,18 +86,27 @@ void loop(void) {
   }
   /* Display the results (magnetic field is measured in uTesla) */
   // time = micros();
+
+  if (NPARS == 9) {
+    Serial.print(micros());
+    Serial.print(","); Serial.print(event.magnetic.x);
+    Serial.print(","); Serial.print(event.magnetic.y); 
+    Serial.print(","); Serial.print(event.magnetic.z); 
+    Serial.print(","); Serial.print(ax);
+    Serial.print(","); Serial.print(ay); 
+    Serial.print(","); Serial.print(az); 
+    Serial.print(","); Serial.print(gx);
+    Serial.print(","); Serial.print(gy); 
+    Serial.println(","); Serial.println(gz); 
+
+  } else if (NPARS == 3) {
   Serial.print(micros());
   Serial.print(","); Serial.print(event.magnetic.x);
   Serial.print(","); Serial.print(event.magnetic.y); 
-  Serial.print(","); Serial.print(event.magnetic.z); 
-  Serial.print(","); Serial.print(ax);
-  Serial.print(","); Serial.print(ay); 
-  Serial.print(","); Serial.print(az); 
-  Serial.print(","); Serial.print(gx);
-  Serial.print(","); Serial.print(gy); 
-  Serial.print(","); Serial.println(gz); 
+  Serial.print(","); Serial.println(event.magnetic.z); 
+  }
 
-  delay(25);
+  delay(50); // Update rate: 20 Hz
 }
 
 

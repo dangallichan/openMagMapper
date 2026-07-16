@@ -171,7 +171,7 @@ void loop() {
 
       updateServingLed(servingMagmlx);
       
-      delay(100); // Update rate: 10 Hz
+      delay(50); // Update rate: 20 Hz
     }
 
     digitalWrite(LED_BUILTIN, HIGH);
