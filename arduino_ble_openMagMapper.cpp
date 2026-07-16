@@ -27,6 +27,11 @@ BLECharacteristic mlxMagChar(BLE_MAGMLX_UUID, BLERead | BLENotify, 12);
 Adafruit_MLX90395 mlx;
 bool mlxAvailable = false;
 unsigned long lastMlxReadWarnMs = 0;
+unsigned long ledCycleStartMs = 0;
+bool ledPulseActive = false;
+
+const unsigned long LED_STREAM_PULSE_PERIOD_MS = 1200;
+const unsigned long LED_STREAM_PULSE_OFF_MS = 150;
 
 // Buffer for sensor data
 uint8_t imuAccelData[12];
@@ -34,9 +39,35 @@ uint8_t imuGyroData[12];
 uint8_t imuMagData[12];
 uint8_t mlxMagData[12];
 
+void updateServingLed(bool servingMagmlx) {
+  if (!servingMagmlx) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    ledPulseActive = false;
+    return;
+  }
+
+  unsigned long nowMs = millis();
+  if (!ledPulseActive) {
+    if (nowMs - ledCycleStartMs >= LED_STREAM_PULSE_PERIOD_MS) {
+      ledPulseActive = true;
+      ledCycleStartMs = nowMs;
+      digitalWrite(LED_BUILTIN, LOW);
+    }
+    return;
+  }
+
+  if (nowMs - ledCycleStartMs >= LED_STREAM_PULSE_OFF_MS) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    ledPulseActive = false;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
   
   // Initialize I2C
   Wire.begin();
@@ -96,6 +127,8 @@ void loop() {
     Serial.println(central.address());
     
     while (central.connected()) {
+      bool servingMagmlx = false;
+
       // Read IMU data
       float accelX, accelY, accelZ;
       float gyroX, gyroY, gyroZ;
@@ -125,6 +158,7 @@ void loop() {
         if (readMLX90395(mlxMagX, mlxMagY, mlxMagZ)) {
           packInt16Data(mlxMagData, mlxMagX, mlxMagY, mlxMagZ);
           mlxMagChar.writeValue(mlxMagData, 12);
+          servingMagmlx = true;
         } else {
           // Throttle warning output to avoid spamming serial logs.
           unsigned long nowMs = millis();
@@ -134,9 +168,13 @@ void loop() {
           }
         }
       }
+
+      updateServingLed(servingMagmlx);
       
       delay(100); // Update rate: 10 Hz
     }
+
+    digitalWrite(LED_BUILTIN, HIGH);
     
     Serial.println("Disconnected");
   }

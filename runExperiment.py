@@ -143,6 +143,7 @@ STALE_VECTOR_TIMEOUT_SEC = 0.5
 AUTO_FREEZE_RATE_HZ = 3.0
 TRACE_LIVE_TIMEOUT_SEC = 0.5
 BLE_TRACE_LIVE_TIMEOUT_SEC = 1.5
+TRACKING_SANITY_RATE_HZ = 3.0
 
 sensor_offset_m = sensor_offset_mm / 1000.0
 sensor_rot_board = omm.euler_xyz_deg_to_rotmat(sensor_rotation_deg)
@@ -218,6 +219,9 @@ badSerialPacketCount = 0
 frozenVectorsTable = []
 autoFreezeEnabled = False
 nextAutoFreezeTime = 0.0
+trackingSanityModeEnabled = False
+nextTrackingSanityMarkTime = 0.0
+trackingSanityMarksTable = []
 
 baseViewScaleMPerUT = 15e-2 / 1000.0
 vectorScaleMultiplier = 1.0
@@ -314,6 +318,20 @@ while True:
                     frozen_color,
                     2,
                 )
+
+            for mark in trackingSanityMarksTable:
+                origin_table_m = np.asarray(mark['origin_table_m'], dtype=np.float32).reshape(1, 3)
+                imgptsMark, _ = cv2.projectPoints(origin_table_m, rvecTable, tvecTable, camera_matrix, dist_coeffs)
+                pt = imgptsMark.reshape(2)
+                if not np.all(np.isfinite(pt)):
+                    continue
+                x = int(round(float(pt[0])))
+                y = int(round(float(pt[1])))
+                cross_size = 8
+                if x < -cross_size or x >= frame_w + cross_size or y < -cross_size or y >= frame_h + cross_size:
+                    continue
+                cv2.line(colorFrame, (x - cross_size, y), (x + cross_size, y), (255, 255, 0), 2)
+                cv2.line(colorFrame, (x, y - cross_size), (x, y + cross_size), (255, 255, 0), 2)
 
         # check for magnetometer data
         sensor_data_received = 0
@@ -471,7 +489,7 @@ while True:
         scale_text = f"Scale x{vectorScaleMultiplier:.2f}  Power {vectorLengthPower:.2f}"
         cv2.putText(colorFrame, scale_text, (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
-        controls_text = "+/- scale   [/] power   Space freeze   Enter auto-freeze   q quit"
+        controls_text = "+/- scale   [/] power   Space freeze   Enter auto-freeze   T tracking mode   X mark   q quit"
         cv2.putText(colorFrame, controls_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1, cv2.LINE_AA)
 
         trace_w = min(380, max(220, frameWidth // 3))
@@ -506,6 +524,10 @@ while True:
         frozen_count_text = f"Frozen vectors: {len(frozenVectorsTable)}"
         cv2.putText(colorFrame, frozen_count_text, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2, cv2.LINE_AA)
 
+        sanity_count_text = f"Tracking marks: {len(trackingSanityMarksTable)}"
+        sanity_color = (0, 255, 255) if trackingSanityModeEnabled else (180, 180, 180)
+        cv2.putText(colorFrame, sanity_count_text, (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.7, sanity_color, 2, cv2.LINE_AA)
+
         if autoFreezeEnabled:
             now_mono = time.monotonic()
             if now_mono >= nextAutoFreezeTime:
@@ -535,6 +557,19 @@ while True:
                     # Retry soon until tracking and vector state are available.
                     nextAutoFreezeTime = now_mono + 0.1
 
+        if trackingSanityModeEnabled:
+            now_mono = time.monotonic()
+            if now_mono >= nextTrackingSanityMarkTime:
+                if retval88 and retvalTable:
+                    sensorOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
+                    trackingSanityMarksTable.append({
+                        'origin_table_m': sensorOriginTableM,
+                    })
+                    sanity_period_sec = 1.0 / max(TRACKING_SANITY_RATE_HZ, 1e-6)
+                    nextTrackingSanityMarkTime = now_mono + sanity_period_sec
+                else:
+                    nextTrackingSanityMarkTime = now_mono + 0.1
+
         out.write(colorFrame)
         cv2.imshow('Frame', colorFrame)
         key = cv2.waitKey(1) & 0xFF
@@ -545,6 +580,24 @@ while True:
                 print(f"Auto-freeze enabled ({AUTO_FREEZE_RATE_HZ:g} Hz). Press Enter to disable.")
             else:
                 print("Auto-freeze disabled.")
+
+        if key in (ord('t'), ord('T')):
+            trackingSanityModeEnabled = not trackingSanityModeEnabled
+            if trackingSanityModeEnabled:
+                nextTrackingSanityMarkTime = time.monotonic()
+                print(f"Tracking sanity mode enabled ({TRACKING_SANITY_RATE_HZ:g} Hz).")
+            else:
+                print("Tracking sanity mode disabled.")
+
+        if key in (ord('x'), ord('X')):
+            if retval88 and retvalTable:
+                sensorOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
+                trackingSanityMarksTable.append({
+                    'origin_table_m': sensorOriginTableM,
+                })
+                print(f"Tracking sanity mark frozen: {len(trackingSanityMarksTable)}")
+            else:
+                print("X pressed, but tracking mark freeze requires visible board88 and tableboard.")
 
         if key == ord(' '):
             if retval88 and retvalTable and lastMagRawVectorUT is not None:
