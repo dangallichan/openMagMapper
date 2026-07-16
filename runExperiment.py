@@ -18,12 +18,10 @@ import ommFuncs as omm
 import ommFuncs_ble as omm_ble
 
 
-# Camera index: 0 is normally the default camera. Set to -1 to scan available
-# cameras only, without starting an experiment.
-camNumber = 1
+camNumber = 0 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
 if camNumber == -1:
     print("Scanning for available camera indices...")
-    scan_backend = cv2.CAP_DSHOW
+    scan_backend = cameraBackend
     available_indices = omm.list_available_camera_indices(max_index=10, backend=scan_backend, require_frame=False)
     if not available_indices:
         print("No cameras found in fast scan; retrying with slower frame validation...")
@@ -31,11 +29,20 @@ if camNumber == -1:
     print(f"Available camera indices (CAP_DSHOW): {available_indices}")
     raise SystemExit(0)
 
-camCapture = cv2.VideoCapture(camNumber)
-
-
-# Configure the camera and all project paths in project_paths.py.
-cameraName = CAMERA_NAME
+selectedCamNumber, camCapture, triedCamIndices = omm.open_camera_reproducible(
+    preferred_indices=[camNumber],
+    frame_width=1280,
+    frame_height=720,
+    backend=cameraBackend,
+    cache_file=cameraCacheFile,
+    warmup_reads=2,
+)
+if camCapture is None:
+    print(f"Fast camera open failed for indices {triedCamIndices}; falling back to index {camNumber}.")
+    camCapture = cv2.VideoCapture(camNumber, cameraBackend)
+else:
+    camNumber = selectedCamNumber
+    print(f"Using camera index {camNumber} via CAP_DSHOW (tried {triedCamIndices}).")
 
 # A timestamp gives each run separate video, per-frame data, and frozen-vector
 # files, preventing previous experiments from being overwritten.
@@ -442,7 +449,7 @@ while True:
                 scale_multiplier=vectorScaleMultiplier,
                 length_power=vectorLengthPower,
             )
-            scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+            scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
             currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
             magVectorTablePts = omm.transform_points_between_frames(currentMagVectorBoardPts, rvec88, tvec88, rvecTable, tvecTable)
             sensor_table_values, mag_table_values = omm.split_sensor_origin_and_mag_vector(magVectorTablePts)
@@ -484,7 +491,7 @@ while True:
                     scale_multiplier=vectorScaleMultiplier,
                     length_power=vectorLengthPower,
                 )
-                scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+                scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
                 currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
                 imgpts,_ = cv2.projectPoints(currentMagVectorBoardPts, rvec88, tvec88, camera_matrix, dist_coeffs)
                 imgpts[imgpts >= 1e6] = 1e6  # try to handle outlier large magnitudes...
@@ -554,7 +561,7 @@ while True:
             now_mono = time.monotonic()
             if now_mono >= nextAutoFreezeTime:
                 if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                    rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                    rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
                     frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                     frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                     frozenVectorsTable.append({
@@ -625,7 +632,7 @@ while True:
         # reliable table coordinates.
         if key == ord(' '):
             if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
                 frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                 frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                 frozenVectorsTable.append({
@@ -671,7 +678,7 @@ while True:
         print(f"Error reading frame from camera number: {camNumber} - is it connected?")
         print("Available cameras:")
         for i in range(10):
-            cap = cv2.VideoCapture(i)
+            cap = cv2.VideoCapture(i, cameraBackend)
             if cap.isOpened():
                 print(f"  Camera index {i} is available")
                 cap.release()
