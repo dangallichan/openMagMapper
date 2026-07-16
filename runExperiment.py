@@ -17,7 +17,7 @@ from collections import deque
 import ommFuncs as omm
 
 
-camNumber = 1 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
+camNumber = 0 # Change this to the appropriate camera index for your setup - 0 is usually the default camera, 1 is the next one, and so on.
 if camNumber == -1:
     print("Scanning for available camera indices...")
     scan_backend = cv2.CAP_DSHOW
@@ -62,7 +62,9 @@ board88, cubePointsProj, markerWidthCube, cubeWidth = omm.getCubeBoard('board88_
 tableboard, tablePointsProj = omm.getTableBoard('table94')
 
 sensor_offset_mm = np.array([0.0, -30.0, -55.0])  # offset in mm (x, y, z) of sensor relative to board88
-sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relative to board88 in degrees (x, y, z)
+sensor_rotation_deg = np.array([-90.0, -90.0, 0.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
+# sensor_rotation_deg = np.array([0.0, -90.0, 90.0])  # rotation of sensor relative to board88 in degrees (x, y, z) # seemed to work before!
+
 
 
 # cv2.projectPoints expects object points in Nx3 (or Nx1x3) float format.
@@ -315,7 +317,7 @@ while True:
                         scale_multiplier=vectorScaleMultiplier,
                         length_power=vectorLengthPower,
                     )
-                    scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+                    scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
 
                     # Keep the latest valid vector so rendering can continue through serial gaps.
                     lastMagRawVectorUT = rawMagVectorUT.copy()
@@ -344,7 +346,7 @@ while True:
                 scale_multiplier=vectorScaleMultiplier,
                 length_power=vectorLengthPower,
             )
-            scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+            scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
             currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
             magVectorTablePts = omm.transform_points_between_frames(currentMagVectorBoardPts, rvec88, tvec88, rvecTable, tvecTable)
             sensor_table_values, mag_table_values = omm.split_sensor_origin_and_mag_vector(magVectorTablePts)
@@ -384,7 +386,7 @@ while True:
                     scale_multiplier=vectorScaleMultiplier,
                     length_power=vectorLengthPower,
                 )
-                scaledMagVectorBoardM = sensor_rot_board.T @ scaledMagVectorSensorM
+                scaledMagVectorBoardM = sensor_rot_board @ scaledMagVectorSensorM
                 currentMagVectorBoardPts = np.vstack((sensor_offset_m, sensor_offset_m + scaledMagVectorBoardM))
                 imgpts,_ = cv2.projectPoints(currentMagVectorBoardPts, rvec88, tvec88, camera_matrix, dist_coeffs)
                 imgpts[imgpts >= 1e6] = 1e6  # try to handle outlier large magnitudes...
@@ -426,7 +428,7 @@ while True:
             now_mono = time.monotonic()
             if now_mono >= nextAutoFreezeTime:
                 if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                    rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                    rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
                     frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                     frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                     frozenVectorsTable.append({
@@ -464,7 +466,7 @@ while True:
 
         if key == ord(' '):
             if retval88 and retvalTable and lastMagRawVectorUT is not None:
-                rawMagVectorBoardUT = sensor_rot_board.T @ lastMagRawVectorUT
+                rawMagVectorBoardUT = sensor_rot_board @ lastMagRawVectorUT
                 frozenOriginTableM = omm.board_point_to_table(sensor_offset_m, rvec88, tvec88, rvecTable, tvecTable)
                 frozenRawVecTableUT = omm.board_vector_to_table(rawMagVectorBoardUT, rvec88, rvecTable)
                 frozenVectorsTable.append({
