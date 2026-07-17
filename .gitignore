@@ -1,4 +1,4 @@
 .conda
 __pycache__
 data/experimentData
-simulatedFields/exports/solenoid_vector_field_3d.json
+simulatedFields/exports/solenoid_streamlines_3d.json
