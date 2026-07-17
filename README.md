@@ -21,4 +21,8 @@ This is still very much at a stage of exploration to see what looks nice. Fields
 ### Example using particles in WebGL / three.js 
 https://github.com/user-attachments/assets/453fbb38-4c9b-403e-ac74-9029a45a4a90
 
+### Example using particles
+https://github.com/user-attachments/assets/fb33818a-8468-4997-8561-3551ac4e1404
+
+
 
