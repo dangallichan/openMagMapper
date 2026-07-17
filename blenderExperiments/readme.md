@@ -1,0 +1,1 @@
+It seems that Blender imports actually work quite well, but the visualisation looked like it was going to be easier using webGL / three.js instead
