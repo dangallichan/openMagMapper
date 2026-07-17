@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openMagMapper Live Viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0b0f14;
+      color: #e6edf3;
+      font-family: Segoe UI, Tahoma, sans-serif;
+    }
+    #app { width: 100%; height: 100%; position: relative; }
+    #hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      background: rgba(10, 14, 20, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      padding: 10px 12px;
+      backdrop-filter: blur(4px);
+      max-width: min(92vw, 560px);
+    }
+    #hud h1 { margin: 0 0 8px 0; font-size: 14px; }
+    #controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input[type="text"] {
+      background: #101722;
+      color: #e6edf3;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      height: 30px;
+      padding: 0 8px;
+      width: min(360px, 65vw);
+    }
+    button {
+      height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 7px;
+      background: #172232;
+      color: #e6edf3;
+      padding: 0 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { background: #203148; }
+    #status { margin-top: 8px; font-size: 12px; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="hud">
+      <h1>openMagMapper Live Viewer</h1>
+      <div id="controls">
+        <input id="modelPath" type="text" value="../dataKeep/magnetOnTable94_aligned.glb" />
+        <button id="loadPathBtn" type="button">Load GLB</button>
+        <button id="fitBtn" type="button">Fit Camera</button>
+      </div>
+      <div id="status">Starting...</div>
+    </div>
+
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const app = document.getElementById('app');
+    const statusEl = document.getElementById('status');
+    const pathInput = document.getElementById('modelPath');
+    const loadPathBtn = document.getElementById('loadPathBtn');
+    const fitBtn = document.getElementById('fitBtn');
+    const FROZEN_POLL_MS = 1000;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    app.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f14);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
+    camera.position.set(1.8, 1.2, 2.1);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false;
+    controls.target.set(0, 0, 0);
+
+    scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x141b22, 1.1));
+    const key = new THREE.DirectionalLight(0xffffff, 1.4);
+    key.position.set(2.5, 3.0, 2.0);
+    scene.add(key);
+
+    const fill = new THREE.DirectionalLight(0x99c1ff, 0.45);
+    fill.position.set(-2.0, 1.5, -1.5);
+    scene.add(fill);
+
+    const grid = new THREE.GridHelper(10, 40, 0x35506f, 0x243447);
+    grid.material.opacity = 0.3;
+    grid.material.transparent = true;
+    scene.add(grid);
+    scene.add(new THREE.AxesHelper(0.3));
+
+    const loader = new GLTFLoader();
+    let activeRoot = null;
+    let frozenRoot = new THREE.Group();
+    frozenRoot.name = 'FrozenVectorsLive';
+    scene.add(frozenRoot);
+
+    const BASE_VIEW_SCALE_M_PER_UT = 15e-2 / 1000.0;
+    const VECTOR_SCALE_MULTIPLIER = 5.0;
+    const VECTOR_LENGTH_POWER = 0.5;
+    const SHAFT_RADIUS = 0.002;
+    const HEAD_RADIUS = 0.006;
+    const HEAD_LENGTH = 0.02;
+
+    let liveSource = '';
+    let liveCount = 0;
+
+    const materialCache = new Map();
+    let renderPending = false;
+
+    function requestRender() {
+      if (renderPending) return;
+      renderPending = true;
+      requestAnimationFrame(() => {
+        renderPending = false;
+        renderer.render(scene, camera);
+      });
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function blenderToThree(v) {
+      return new THREE.Vector3(v.x, v.z, -v.y);
+    }
+
+    function scaleMagneticVector(vec) {
+      const mag = vec.length();
+      if (!Number.isFinite(mag) || mag <= 0) {
+        return { scaled: new THREE.Vector3(), magnitude: 0 };
+      }
+      const unit = vec.clone().normalize();
+      const scaledLen = BASE_VIEW_SCALE_M_PER_UT * VECTOR_SCALE_MULTIPLIER * Math.pow(mag, VECTOR_LENGTH_POWER);
+      return { scaled: unit.multiplyScalar(scaledLen), magnitude: mag };
+    }
+
+    function lerp(a, b, t) {
+      return a * (1 - t) + b * t;
+    }
+
+    function magnitudeToColor(mag, minMag, maxMag) {
+      if (!Number.isFinite(mag)) return new THREE.Color(0.7, 0.7, 0.7);
+      if (!Number.isFinite(minMag) || !Number.isFinite(maxMag) || maxMag <= minMag) {
+        return new THREE.Color(0.1, 0.9, 0.9);
+      }
+      const t = Math.max(0, Math.min(1, (mag - minMag) / (maxMag - minMag)));
+      if (t < 0.5) {
+        const u = t / 0.5;
+        return new THREE.Color(lerp(0.08, 0.10, u), lerp(0.35, 0.95, u), lerp(1.0, 0.95, u));
+      }
+      const u = (t - 0.5) / 0.5;
+      return new THREE.Color(lerp(0.10, 1.0, u), lerp(0.95, 0.92, u), lerp(0.95, 0.20, u));
+    }
+
+    function getMaterial(color) {
+      const key = `${color.r.toFixed(3)}_${color.g.toFixed(3)}_${color.b.toFixed(3)}`;
+      if (materialCache.has(key)) {
+        return materialCache.get(key);
+      }
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.0 });
+      materialCache.set(key, mat);
+      return mat;
+    }
+
+    function clearModel() {
+      if (!activeRoot) return;
+      scene.remove(activeRoot);
+      activeRoot.traverse((obj) => {
+        if (!obj.isMesh) return;
+        if (obj.geometry) obj.geometry.dispose();
+      });
+      activeRoot = null;
+    }
+
+    function clearFrozenVectors() {
+      scene.remove(frozenRoot);
+      frozenRoot.traverse((obj) => {
+        if (!obj.isMesh) return;
+        if (obj.geometry) obj.geometry.dispose();
+      });
+      frozenRoot = new THREE.Group();
+      frozenRoot.name = 'FrozenVectorsLive';
+      scene.add(frozenRoot);
+      liveCount = 0;
+      requestRender();
+    }
+
+    function fitCameraToLoadedContent() {
+      const box = new THREE.Box3();
+      let hasContent = false;
+
+      if (activeRoot) {
+        box.expandByObject(activeRoot);
+        hasContent = true;
+      }
+      if (frozenRoot && frozenRoot.children.length > 0) {
+        box.expandByObject(frozenRoot);
+        hasContent = true;
+      }
+      if (!hasContent || box.isEmpty()) return;
+
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(size.x, size.y, size.z) * 0.55 || 0.5;
+
+      controls.target.copy(center);
+      camera.position.copy(center).add(new THREE.Vector3(radius * 2.0, radius * 1.4, radius * 2.2));
+      camera.near = Math.max(radius / 500, 0.001);
+      camera.far = Math.max(radius * 60, 50);
+      camera.updateProjectionMatrix();
+      requestRender();
+    }
+
+    function makeArrow(origin, vecUT, color) {
+      const { scaled } = scaleMagneticVector(vecUT);
+      if (scaled.length() < 1e-9) return null;
+
+      const start = origin.clone().sub(scaled.clone().multiplyScalar(0.5));
+      const end = origin.clone().add(scaled.clone().multiplyScalar(0.5));
+      const axis = end.clone().sub(start);
+      const totalLen = axis.length();
+      const dir = axis.clone().normalize();
+      const headLen = Math.min(HEAD_LENGTH, totalLen * 0.45);
+      const shaftLen = Math.max(totalLen - headLen, totalLen * 0.55);
+
+      const shaftGeo = new THREE.CylinderGeometry(SHAFT_RADIUS, SHAFT_RADIUS, shaftLen, 10);
+      const headGeo = new THREE.ConeGeometry(HEAD_RADIUS, headLen, 12);
+      const mat = getMaterial(color);
+
+      const shaft = new THREE.Mesh(shaftGeo, mat);
+      const head = new THREE.Mesh(headGeo, mat);
+
+      const shaftCenter = start.clone().add(dir.clone().multiplyScalar(shaftLen * 0.5));
+      const headCenter = start.clone().add(dir.clone().multiplyScalar(shaftLen + headLen * 0.5));
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+
+      shaft.position.copy(shaftCenter);
+      shaft.quaternion.copy(q);
+      head.position.copy(headCenter);
+      head.quaternion.copy(q);
+
+      const group = new THREE.Group();
+      group.add(shaft);
+      group.add(head);
+      return group;
+    }
+
+    async function pollFrozenTail() {
+      try {
+        const res = await fetch(`/api/frozen_tail?since=${liveCount}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = await res.json();
+
+        if (!payload.source) {
+          setStatus('Waiting for frozen vectors CSV...');
+          return;
+        }
+
+        if (liveSource && payload.source !== liveSource) {
+          clearFrozenVectors();
+        }
+
+        liveSource = payload.source;
+
+        const rows = payload.rows || [];
+        if (rows.length) {
+          const mags = rows.map((r) => {
+            const v = new THREE.Vector3(r.vec[0], r.vec[1], r.vec[2]);
+            return v.length();
+          });
+          const minMag = Math.min(...mags);
+          const maxMag = Math.max(...mags);
+
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const origin = blenderToThree(new THREE.Vector3(r.origin[0], r.origin[1], r.origin[2]));
+            const vecUT = blenderToThree(new THREE.Vector3(r.vec[0], r.vec[1], r.vec[2]));
+            const color = magnitudeToColor(mags[i], minMag, maxMag);
+            const arrow = makeArrow(origin, vecUT, color);
+            if (arrow) frozenRoot.add(arrow);
+          }
+          requestRender();
+        }
+
+        liveCount = payload.count || liveCount;
+        setStatus(`Live source: ${liveSource} | vectors: ${liveCount}`);
+      } catch (err) {
+        setStatus(`Frozen tail error: ${err?.message || err}`);
+      }
+    }
+
+    function loadModel(path) {
+      if (!path) return;
+      setStatus(`Loading ${path} ...`);
+      loader.load(
+        path,
+        (gltf) => {
+          clearModel();
+          activeRoot = gltf.scene;
+          scene.add(activeRoot);
+          fitCameraToLoadedContent();
+          setStatus(`Loaded model. Live vectors: ${liveCount}`);
+          requestRender();
+        },
+        undefined,
+        (err) => setStatus(`Model load failed: ${err?.message || err}`)
+      );
+    }
+
+    loadPathBtn.addEventListener('click', () => loadModel(pathInput.value.trim()));
+    fitBtn.addEventListener('click', () => fitCameraToLoadedContent());
+
+    const url = new URL(window.location.href);
+    const modelParam = url.searchParams.get('model');
+    if (modelParam) pathInput.value = modelParam;
+
+    controls.addEventListener('change', requestRender);
+    loadModel(pathInput.value.trim());
+    requestRender();
+
+    setInterval(() => {
+      if (document.hidden) return;
+      pollFrozenTail();
+    }, FROZEN_POLL_MS);
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        pollFrozenTail();
+        requestRender();
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      requestRender();
+    });
+  </script>
+</body>
+</html>

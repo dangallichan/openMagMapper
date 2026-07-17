@@ -75,6 +75,33 @@
       min-height: 1.2em;
       word-break: break-word;
     }
+    #particleControls {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .pctl {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(18, 28, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
+      padding: 3px 6px;
+      line-height: 1;
+    }
+    .pctl input[type="range"] {
+      width: 90px;
+      accent-color: #6fd8ff;
+    }
+    .pctl .pv {
+      min-width: 42px;
+      text-align: right;
+      opacity: 0.95;
+    }
     #fileInput {
       display: none;
     }
@@ -89,9 +116,49 @@
         <button id="loadPathBtn" type="button">Load Path</button>
         <input id="frozenPath" type="text" value="../dataKeep/Exp_cam_frozenVectors_USBwebcam_JLC1080_20260716_143634.csv" title="Relative CSV path from this page" />
         <button id="loadFrozenBtn" type="button">Load Frozen CSV</button>
+        <input id="streamPath" type="text" value="../simulatedFields/exports/test_solenoid_streamlines_3d.json" title="Relative streamline JSON path from this page" />
+        <button id="loadStreamBtn" type="button">Load Streamlines</button>
+        <input id="streamRotDeg" type="number" value="90" step="1" title="Rotate streamlines in x-z plane (deg)" style="width: 92px;" />
+        <input id="streamZOffset" type="number" value="0.015" step="0.001" title="Source-frame z offset (m)" style="width: 96px;" />
+        <button id="applyRotBtn" type="button">Apply XZ+Z</button>
+        <button id="toggleVectorsBtn" type="button">Hide Vectors</button>
+        <button id="toggleLinesBtn" type="button">Hide Streamlines</button>
+        <button id="toggleParticlesBtn" type="button">Hide Particles</button>
         <label class="file-btn" for="fileInput">Open Local File</label>
         <input id="fileInput" type="file" accept=".glb,.gltf" />
         <button id="fitBtn" type="button">Fit Camera</button>
+      </div>
+      <div id="particleControls">
+        <div class="pctl">
+          <span>count</span>
+          <input id="particleCount" type="range" min="1" max="50" step="1" value="50" />
+          <span id="particleCountVal" class="pv">50x</span>
+        </div>
+        <div class="pctl">
+          <span>size</span>
+          <input id="particleSize" type="range" min="0.05" max="10" step="0.05" value="1.75" />
+          <span id="particleSizeVal" class="pv">1.75</span>
+        </div>
+        <div class="pctl">
+          <span>speed</span>
+          <input id="particleSpeed" type="range" min="0.1" max="3" step="0.1" value="0.4" />
+          <span id="particleSpeedVal" class="pv">0.4x</span>
+        </div>
+        <div class="pctl">
+          <span>trail</span>
+          <input id="trailLength" type="range" min="0" max="0.8" step="0.02" value="0.16" />
+          <span id="trailLengthVal" class="pv">0.16</span>
+        </div>
+        <div class="pctl">
+          <span>saturation</span>
+          <input id="particleSaturation" type="range" min="0" max="1" step="0.05" value="0.8" />
+          <span id="particleSaturationVal" class="pv">0.80</span>
+        </div>
+        <div class="pctl">
+          <span>brightness</span>
+          <input id="particleBrightness" type="range" min="0.1" max="1.4" step="0.05" value="0.3" />
+          <span id="particleBrightnessVal" class="pv">0.30</span>
+        </div>
       </div>
       <div id="status">Ready.</div>
     </div>
@@ -117,11 +184,31 @@
     const loadPathBtn = document.getElementById('loadPathBtn');
     const frozenPathInput = document.getElementById('frozenPath');
     const loadFrozenBtn = document.getElementById('loadFrozenBtn');
+    const streamPathInput = document.getElementById('streamPath');
+    const loadStreamBtn = document.getElementById('loadStreamBtn');
+    const streamRotDegInput = document.getElementById('streamRotDeg');
+    const streamZOffsetInput = document.getElementById('streamZOffset');
+    const applyRotBtn = document.getElementById('applyRotBtn');
+    const toggleVectorsBtn = document.getElementById('toggleVectorsBtn');
+    const toggleLinesBtn = document.getElementById('toggleLinesBtn');
+    const toggleParticlesBtn = document.getElementById('toggleParticlesBtn');
+    const particleCountInput = document.getElementById('particleCount');
+    const particleSizeInput = document.getElementById('particleSize');
+    const particleSpeedInput = document.getElementById('particleSpeed');
+    const trailLengthInput = document.getElementById('trailLength');
+    const particleSaturationInput = document.getElementById('particleSaturation');
+    const particleBrightnessInput = document.getElementById('particleBrightness');
+    const particleCountVal = document.getElementById('particleCountVal');
+    const particleSizeVal = document.getElementById('particleSizeVal');
+    const particleSpeedVal = document.getElementById('particleSpeedVal');
+    const trailLengthVal = document.getElementById('trailLengthVal');
+    const particleSaturationVal = document.getElementById('particleSaturationVal');
+    const particleBrightnessVal = document.getElementById('particleBrightnessVal');
     const fileInput = document.getElementById('fileInput');
     const fitBtn = document.getElementById('fitBtn');
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     app.appendChild(renderer.domElement);
@@ -133,7 +220,7 @@
     camera.position.set(1.8, 1.2, 2.1);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+    controls.enableDamping = false;
     controls.target.set(0, 0, 0);
 
     const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x141b22, 1.1);
@@ -158,6 +245,21 @@
     const loader = new GLTFLoader();
     let activeRoot = null;
     let frozenRoot = null;
+    let streamlineRoot = null;
+
+    const clock = new THREE.Clock();
+    let animationLoopRunning = false;
+    let streamlinePaths = [];
+    let particleSystem = null;
+    let streamlineLineGroup = null;
+    let particleTime = 0.0;
+
+    let vectorsVisible = false;
+    let streamlinesVisible = false;
+    let particlesVisible = true;
+
+    const GPU_PATH_SAMPLES = 192;
+    const GPU_TRAIL_STEPS = 8;
 
     const BASE_VIEW_SCALE_M_PER_UT = 15e-2 / 1000.0;
     const VECTOR_SCALE_MULTIPLIER = 5.0;
@@ -165,6 +267,17 @@
     const SHAFT_RADIUS = 0.002;
     const HEAD_RADIUS = 0.006;
     const HEAD_LENGTH = 0.02;
+
+    let renderPending = false;
+
+    function requestRender() {
+      if (renderPending) return;
+      renderPending = true;
+      requestAnimationFrame(() => {
+        renderPending = false;
+        renderer.render(scene, camera);
+      });
+    }
 
     // CSV coordinates are produced in the Blender/table frame (Z-up).
     // Three.js/glTF scene uses Y-up, so convert with X unchanged and rotate
@@ -205,6 +318,50 @@
       statusEl.textContent = msg;
     }
 
+    function updateVisibilityButtons() {
+      toggleVectorsBtn.textContent = vectorsVisible ? 'Hide Vectors' : 'Show Vectors';
+      toggleLinesBtn.textContent = streamlinesVisible ? 'Hide Streamlines' : 'Show Streamlines';
+      toggleParticlesBtn.textContent = particlesVisible ? 'Hide Particles' : 'Show Particles';
+    }
+
+    function applyVisibilityToggles() {
+      if (frozenRoot) frozenRoot.visible = vectorsVisible;
+      if (streamlineLineGroup) streamlineLineGroup.visible = streamlinesVisible;
+      if (particleSystem?.points) particleSystem.points.visible = particlesVisible;
+      updateVisibilityButtons();
+    }
+
+    function readParticleOptions() {
+      return {
+        particlesPerPath: Math.max(1, Number(particleCountInput.value) | 0),
+        pointSize: Math.max(0.05, Number(particleSizeInput.value)),
+        speedScale: Math.max(0.01, Number(particleSpeedInput.value)),
+        trailLength: Math.max(0.0, Math.min(0.95, Number(trailLengthInput.value))),
+        saturation: Math.max(0.0, Math.min(1.0, Number(particleSaturationInput.value))),
+        brightness: Math.max(0.05, Math.min(1.5, Number(particleBrightnessInput.value))),
+      };
+    }
+
+    function refreshParticleControlLabels() {
+      const opt = readParticleOptions();
+      particleCountVal.textContent = `${opt.particlesPerPath}x`;
+      particleSizeVal.textContent = `${opt.pointSize.toFixed(2)}`;
+      particleSpeedVal.textContent = `${opt.speedScale.toFixed(1)}x`;
+      trailLengthVal.textContent = `${opt.trailLength.toFixed(2)}`;
+      particleSaturationVal.textContent = `${opt.saturation.toFixed(2)}`;
+      particleBrightnessVal.textContent = `${opt.brightness.toFixed(2)}`;
+    }
+
+    function disposeParticleSystem(system) {
+      if (!system) return;
+      if (system.pathTexture?.dispose) system.pathTexture.dispose();
+      if (system.points?.geometry) system.points.geometry.dispose();
+      if (system.material?.dispose) system.material.dispose();
+      if (system.points?.material?.dispose && system.points.material !== system.material) {
+        system.points.material.dispose();
+      }
+    }
+
     function clearModel() {
       if (!activeRoot) return;
       scene.remove(activeRoot);
@@ -233,6 +390,564 @@
       frozenRoot = null;
     }
 
+    function clearStreamlines() {
+      if (!streamlineRoot) return;
+
+      scene.remove(streamlineRoot);
+      streamlineRoot.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (m && m.dispose) m.dispose();
+        }
+      });
+
+      streamlineRoot = null;
+      streamlineLineGroup = null;
+      streamlinePaths = [];
+      disposeParticleSystem(particleSystem);
+      particleSystem = null;
+      particleTime = 0.0;
+    }
+
+    function rebuildParticlesOnly() {
+      if (!streamlineRoot || !streamlinePaths.length) return;
+      if (particleSystem?.points) {
+        streamlineRoot.remove(particleSystem.points);
+      }
+      disposeParticleSystem(particleSystem);
+
+      particleSystem = buildParticleSystem(streamlinePaths, readParticleOptions());
+      if (particleSystem?.points) {
+        streamlineRoot.add(particleSystem.points);
+      }
+      applyVisibilityToggles();
+      particleTime = 0.0;
+      requestRender();
+    }
+
+    function applyParticleOptionsLive() {
+      if (!particleSystem) return;
+      const opt = readParticleOptions();
+
+      if (particleSystem.mode === 'gpu') {
+        particleSystem.material.uniforms.uPointSize.value = opt.pointSize;
+        particleSystem.material.uniforms.uSpeedScale.value = opt.speedScale;
+        particleSystem.material.uniforms.uTrailLength.value = opt.trailLength;
+        particleSystem.material.uniforms.uBrightness.value = opt.brightness;
+        particleSystem.options = opt;
+      } else {
+        particleSystem.options = opt;
+        if (particleSystem.points?.material) {
+          particleSystem.points.material.size = 0.0015 * opt.pointSize;
+          particleSystem.points.material.opacity = 0.9 * opt.brightness;
+        }
+      }
+      requestRender();
+    }
+
+    function ensureAnimationLoop() {
+      if (animationLoopRunning) return;
+      animationLoopRunning = true;
+
+      function tick() {
+        const dt = Math.min(clock.getDelta(), 0.05);
+        updateParticles(dt);
+        requestRender();
+        requestAnimationFrame(tick);
+      }
+
+      clock.getDelta();
+      requestAnimationFrame(tick);
+    }
+
+    function applyStreamlineTransform() {
+      if (!streamlineRoot) return;
+      const deg = Number(streamRotDegInput.value);
+      const radians = Number.isFinite(deg) ? (deg * Math.PI) / 180.0 : 0.0;
+      const zOffset = Number(streamZOffsetInput.value);
+      const z = Number.isFinite(zOffset) ? zOffset : 0.0;
+      // In this viewer, table/horizontal plane is XZ (Y-up), so rotate around +Y.
+      streamlineRoot.rotation.set(0, radians, 0);
+      // Source-frame Z corresponds to viewer Y (same convention as blenderToThree).
+      streamlineRoot.position.set(0, z, 0);
+    }
+
+    function unpackPackedStreamlines(packed) {
+      const counts = Array.isArray(packed?.counts) ? packed.counts : [];
+      const positions = Array.isArray(packed?.positions) ? packed.positions : [];
+
+      const out = [];
+      let cursor = 0;
+      for (const countRaw of counts) {
+        const count = Math.max(0, Number(countRaw) | 0);
+        if (count < 2) {
+          cursor += count * 3;
+          continue;
+        }
+        const needed = cursor + count * 3;
+        if (needed > positions.length) break;
+
+        const pts = new Float32Array(count * 3);
+        for (let i = 0; i < count * 3; i++) {
+          pts[i] = Number(positions[cursor + i]);
+        }
+        cursor = needed;
+        out.push(pts);
+      }
+      return out;
+    }
+
+    function computePathArcLength(pathArray) {
+      const n = (pathArray.length / 3) | 0;
+      if (n < 2) return { cumulative: [0], total: 0 };
+
+      const cumulative = new Array(n);
+      cumulative[0] = 0;
+      let total = 0;
+
+      for (let i = 1; i < n; i++) {
+        const i0 = (i - 1) * 3;
+        const i1 = i * 3;
+        const dx = pathArray[i1] - pathArray[i0];
+        const dy = pathArray[i1 + 1] - pathArray[i0 + 1];
+        const dz = pathArray[i1 + 2] - pathArray[i0 + 2];
+        total += Math.sqrt(dx * dx + dy * dy + dz * dz);
+        cumulative[i] = total;
+      }
+
+      return { cumulative, total };
+    }
+
+    function samplePathByDistance(pathArray, cumulative, distance) {
+      const n = (pathArray.length / 3) | 0;
+      if (n < 2) return [0, 0, 0];
+
+      const total = cumulative[n - 1];
+      if (total <= 1e-9) {
+        return [pathArray[0], pathArray[1], pathArray[2]];
+      }
+
+      let d = distance % total;
+      if (d < 0) d += total;
+
+      let hi = n - 1;
+      let lo = 0;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cumulative[mid] < d) lo = mid + 1;
+        else hi = mid;
+      }
+
+      const i1 = Math.max(1, lo);
+      const i0 = i1 - 1;
+      const d0 = cumulative[i0];
+      const d1 = cumulative[i1];
+      const u = d1 > d0 ? (d - d0) / (d1 - d0) : 0;
+
+      const j0 = i0 * 3;
+      const j1 = i1 * 3;
+      return [
+        pathArray[j0] * (1 - u) + pathArray[j1] * u,
+        pathArray[j0 + 1] * (1 - u) + pathArray[j1 + 1] * u,
+        pathArray[j0 + 2] * (1 - u) + pathArray[j1 + 2] * u,
+      ];
+    }
+
+    function samplePathByDistanceClamped(pathArray, cumulative, distance) {
+      const n = (pathArray.length / 3) | 0;
+      if (n < 2) return [0, 0, 0];
+
+      const total = cumulative[n - 1];
+      if (total <= 1e-9) {
+        return [pathArray[0], pathArray[1], pathArray[2]];
+      }
+
+      const d = Math.max(0, Math.min(total, distance));
+      let hi = n - 1;
+      let lo = 0;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cumulative[mid] < d) lo = mid + 1;
+        else hi = mid;
+      }
+
+      const i1 = Math.max(1, lo);
+      const i0 = i1 - 1;
+      const d0 = cumulative[i0];
+      const d1 = cumulative[i1];
+      const u = d1 > d0 ? (d - d0) / (d1 - d0) : 0;
+
+      const j0 = i0 * 3;
+      const j1 = i1 * 3;
+      return [
+        pathArray[j0] * (1 - u) + pathArray[j1] * u,
+        pathArray[j0 + 1] * (1 - u) + pathArray[j1 + 1] * u,
+        pathArray[j0 + 2] * (1 - u) + pathArray[j1 + 2] * u,
+      ];
+    }
+
+    function buildCpuParticleSystem(paths, options) {
+      if (!paths.length) return null;
+
+      const pathCount = paths.length;
+      const logicalCount = Math.max(pathCount, pathCount * options.particlesPerPath);
+      const trailSteps = GPU_TRAIL_STEPS;
+      const particleCount = logicalCount * trailSteps;
+      const positions = new Float32Array(particleCount * 3);
+      const colors = new Float32Array(particleCount * 3);
+      const pathIndices = new Uint32Array(logicalCount);
+      const leadDistances = new Float32Array(logicalCount);
+      const leadSpeeds = new Float32Array(logicalCount);
+
+      for (let i = 0; i < logicalCount; i++) {
+        const pathIndex = i % pathCount;
+        pathIndices[i] = pathIndex;
+        leadDistances[i] = Math.random() * paths[pathIndex].total;
+        leadSpeeds[i] = (0.045 + 0.04 * Math.random()) * options.speedScale;
+
+        const t = pathIndex / Math.max(1, pathCount - 1);
+        const base = new THREE.Color().setHSL(0.60 - 0.35 * t, options.saturation, 0.62);
+        for (let s = 0; s < trailSteps; s++) {
+          const idx = i * trailSteps + s;
+          const fade = 1.0 - s / Math.max(1, trailSteps - 1);
+          const c = base.clone().multiplyScalar(0.35 + 0.65 * fade);
+          colors[idx * 3] = c.r;
+          colors[idx * 3 + 1] = c.g;
+          colors[idx * 3 + 2] = c.b;
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      const mat = new THREE.PointsMaterial({
+        size: 0.0015 * options.pointSize,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.9 * options.brightness,
+        depthWrite: false,
+      });
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+
+      return {
+        mode: 'cpu',
+        points,
+        positions,
+        pathIndices,
+        leadDistances,
+        leadSpeeds,
+        trailSteps,
+        options,
+      };
+    }
+
+    function samplePathByRatio(pathArray, cumulative, ratio) {
+      const n = (pathArray.length / 3) | 0;
+      if (n < 2) return [0, 0, 0];
+
+      const total = cumulative[n - 1];
+      if (total <= 1e-9) return [pathArray[0], pathArray[1], pathArray[2]];
+
+      const r = ((ratio % 1) + 1) % 1;
+      return samplePathByDistance(pathArray, cumulative, r * total);
+    }
+
+    function buildPathSampleTexture(paths, samplesPerPath) {
+      const pathCount = paths.length;
+      const data = new Float32Array(pathCount * samplesPerPath * 4);
+
+      for (let p = 0; p < pathCount; p++) {
+        const path = paths[p];
+        for (let i = 0; i < samplesPerPath; i++) {
+          const ratio = samplesPerPath > 1 ? i / (samplesPerPath - 1) : 0;
+          const pos = samplePathByRatio(path.positions, path.cumulative, ratio);
+          const idx = (p * samplesPerPath + i) * 4;
+          data[idx] = pos[0];
+          data[idx + 1] = pos[1];
+          data[idx + 2] = pos[2];
+          data[idx + 3] = 1.0;
+        }
+      }
+
+      const tex = new THREE.DataTexture(data, samplesPerPath, pathCount, THREE.RGBAFormat, THREE.FloatType);
+      tex.minFilter = THREE.NearestFilter;
+      tex.magFilter = THREE.NearestFilter;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.generateMipmaps = false;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    function buildGpuParticleSystem(paths, options) {
+      if (!paths.length) return null;
+      const pathCount = paths.length;
+      const logicalCount = Math.max(pathCount, pathCount * options.particlesPerPath);
+      const trailSteps = GPU_TRAIL_STEPS;
+      const particleCount = logicalCount * trailSteps;
+
+      const pathTex = buildPathSampleTexture(paths, GPU_PATH_SAMPLES);
+
+      const geo = new THREE.BufferGeometry();
+      const seed = new Float32Array(particleCount);
+      const speed = new Float32Array(particleCount);
+      const pathIndex = new Float32Array(particleCount);
+      const trailT = new Float32Array(particleCount);
+      const trailFade = new Float32Array(particleCount);
+      const color = new Float32Array(particleCount * 3);
+
+      for (let i = 0; i < logicalCount; i++) {
+        const pIdx = i % pathCount;
+        const tPath = pIdx / Math.max(1, pathCount - 1);
+        const base = new THREE.Color().setHSL(0.60 - 0.35 * tPath, options.saturation, 0.62);
+        const leadSeed = Math.random();
+        const leadSpeed = 0.045 + 0.04 * Math.random();
+
+        for (let s = 0; s < trailSteps; s++) {
+          const idx = i * trailSteps + s;
+          const tt = s / Math.max(1, trailSteps - 1);
+          const fade = 1.0 - tt;
+
+          pathIndex[idx] = pIdx;
+          seed[idx] = leadSeed;
+          speed[idx] = leadSpeed;
+          trailT[idx] = tt;
+          trailFade[idx] = fade;
+
+          const c = base.clone().multiplyScalar(0.35 + 0.65 * fade);
+          color[idx * 3] = c.r;
+          color[idx * 3 + 1] = c.g;
+          color[idx * 3 + 2] = c.b;
+        }
+      }
+
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(particleCount * 3), 3));
+      geo.setAttribute('aPathIndex', new THREE.BufferAttribute(pathIndex, 1));
+      geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+      geo.setAttribute('aSpeed', new THREE.BufferAttribute(speed, 1));
+      geo.setAttribute('aTrailT', new THREE.BufferAttribute(trailT, 1));
+      geo.setAttribute('aTrailFade', new THREE.BufferAttribute(trailFade, 1));
+      geo.setAttribute('color', new THREE.BufferAttribute(color, 3));
+
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uPathTex: { value: pathTex },
+          uPathCount: { value: pathCount },
+          uSamplesPerPath: { value: GPU_PATH_SAMPLES },
+          uTime: { value: 0.0 },
+          uPointSize: { value: options.pointSize },
+          uSpeedScale: { value: options.speedScale },
+          uTrailLength: { value: options.trailLength },
+          uRespawnFade: { value: 0.08 },
+          uBrightness: { value: options.brightness },
+        },
+        vertexColors: true,
+        vertexShader: `
+          attribute float aPathIndex;
+          attribute float aSeed;
+          attribute float aSpeed;
+          attribute float aTrailT;
+          attribute float aTrailFade;
+
+          uniform sampler2D uPathTex;
+          uniform float uPathCount;
+          uniform float uSamplesPerPath;
+          uniform float uTime;
+          uniform float uPointSize;
+          uniform float uSpeedScale;
+          uniform float uTrailLength;
+          uniform float uRespawnFade;
+
+          varying vec3 vColor;
+          varying float vTrailFade;
+          varying float vRespawnFade;
+
+          vec3 samplePathPos(float pathIdx, float t01) {
+            float sc = max(uSamplesPerPath - 1.0, 1.0);
+            float tf = clamp(t01, 0.0, 1.0) * sc;
+            float i0 = floor(tf);
+            float i1 = min(i0 + 1.0, sc);
+            float u = tf - i0;
+
+            float uvx0 = (i0 + 0.5) / uSamplesPerPath;
+            float uvx1 = (i1 + 0.5) / uSamplesPerPath;
+            float uvy = (pathIdx + 0.5) / max(uPathCount, 1.0);
+
+            vec3 p0 = texture2D(uPathTex, vec2(uvx0, uvy)).xyz;
+            vec3 p1 = texture2D(uPathTex, vec2(uvx1, uvy)).xyz;
+            return mix(p0, p1, u);
+          }
+
+          void main() {
+            float lead = fract(aSeed + uTime * aSpeed * uSpeedScale);
+            float t = fract(lead - aTrailT * uTrailLength);
+            vec3 worldPos = samplePathPos(aPathIndex, t);
+            vec4 mv = modelViewMatrix * vec4(worldPos, 1.0);
+
+            float zScale = clamp(220.0 / max(1.0, -mv.z), 1.0, 6.0);
+            gl_PointSize = uPointSize * zScale * (0.72 + 0.28 * aTrailFade);
+            gl_Position = projectionMatrix * mv;
+            vColor = color;
+            vTrailFade = aTrailFade;
+            vRespawnFade = smoothstep(0.0, uRespawnFade, lead) * smoothstep(0.0, uRespawnFade, 1.0 - lead);
+          }
+        `,
+        fragmentShader: `
+          uniform float uBrightness;
+          varying vec3 vColor;
+          varying float vTrailFade;
+          varying float vRespawnFade;
+          void main() {
+            vec2 p = gl_PointCoord - vec2(0.5);
+            float r2 = dot(p, p);
+            if (r2 > 0.25) discard;
+            float alpha = smoothstep(0.25, 0.0, r2);
+            gl_FragColor = vec4(vColor * uBrightness, 0.95 * alpha * (0.2 + 0.8 * vTrailFade) * vRespawnFade * uBrightness);
+          }
+        `,
+      });
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+
+      return {
+        mode: 'gpu',
+        points,
+        material: mat,
+        pathTexture: pathTex,
+        trailSteps,
+        options,
+      };
+    }
+
+    function buildParticleSystem(paths, options) {
+      const canGpu = renderer.capabilities.isWebGL2 || renderer.extensions.has('OES_texture_float');
+      if (canGpu) {
+        try {
+          const gpuSystem = buildGpuParticleSystem(paths, options);
+          if (gpuSystem) return gpuSystem;
+        } catch (_) {
+          // Fall back to CPU path updates if GPU texture setup fails.
+        }
+      }
+      return buildCpuParticleSystem(paths, options);
+    }
+
+    function updateParticles(dt) {
+      if (!particleSystem || !streamlinePaths.length) return;
+
+      if (particleSystem.mode === 'gpu') {
+        particleTime += dt;
+        particleSystem.material.uniforms.uTime.value = particleTime;
+        return;
+      }
+
+      const trailSteps = particleSystem.trailSteps || 1;
+      const trailLen = particleSystem.options?.trailLength ?? 0.0;
+      const speedScale = particleSystem.options?.speedScale ?? 1.0;
+
+      for (let i = 0; i < particleSystem.pathIndices.length; i++) {
+        const pathIndex = particleSystem.pathIndices[i];
+        const path = streamlinePaths[pathIndex];
+        if (!path || path.total <= 1e-9) continue;
+
+        particleSystem.leadDistances[i] += particleSystem.leadSpeeds[i] * dt * speedScale;
+        if (particleSystem.leadDistances[i] >= path.total) {
+          particleSystem.leadDistances[i] = Math.random() * (0.15 * path.total);
+        }
+        for (let s = 0; s < trailSteps; s++) {
+          const idx = i * trailSteps + s;
+          const lag = trailLen * path.total * (s / Math.max(1, trailSteps - 1));
+          const p = samplePathByDistanceClamped(path.positions, path.cumulative, particleSystem.leadDistances[i] - lag);
+          particleSystem.positions[idx * 3] = p[0];
+          particleSystem.positions[idx * 3 + 1] = p[1];
+          particleSystem.positions[idx * 3 + 2] = p[2];
+        }
+      }
+
+      particleSystem.points.geometry.attributes.position.needsUpdate = true;
+    }
+
+    function addStreamlineVisuals(pathArrays) {
+      clearStreamlines();
+
+      streamlineRoot = new THREE.Group();
+      streamlineRoot.name = 'SimulatedStreamlines';
+      streamlineLineGroup = new THREE.Group();
+      streamlineLineGroup.name = 'SimulatedStreamlineLines';
+      streamlineRoot.add(streamlineLineGroup);
+
+      const lineMat = new THREE.LineBasicMaterial({
+        color: 0x4ad6ff,
+        transparent: true,
+        opacity: 0.42,
+      });
+
+      streamlinePaths = pathArrays.map((arr) => {
+        const stats = computePathArcLength(arr);
+        return {
+          positions: arr,
+          cumulative: stats.cumulative,
+          total: stats.total,
+        };
+      });
+
+      for (const path of streamlinePaths) {
+        if ((path.positions.length / 3) < 2) continue;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(path.positions, 3));
+        const line = new THREE.Line(geo, lineMat.clone());
+        streamlineLineGroup.add(line);
+      }
+
+      particleSystem = buildParticleSystem(streamlinePaths, readParticleOptions());
+      if (particleSystem) {
+        streamlineRoot.add(particleSystem.points);
+      }
+      particleTime = 0.0;
+
+      applyStreamlineTransform();
+      applyVisibilityToggles();
+      scene.add(streamlineRoot);
+      fitCameraToLoadedContent();
+      ensureAnimationLoop();
+    }
+
+    async function loadStreamlineJson(path) {
+      if (!path) {
+        setStatus('Enter a streamline JSON path first.');
+        return;
+      }
+      setStatus(`Loading streamlines from ${path} ...`);
+
+      try {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const payload = await res.json();
+        const packed = payload?.streamlines?.resampled || payload?.streamlines?.raw;
+        const pathArrays = unpackPackedStreamlines(packed);
+        if (!pathArrays.length) {
+          throw new Error('No valid streamline paths found in JSON.');
+        }
+
+        addStreamlineVisuals(pathArrays);
+        setStatus(
+          `Loaded ${pathArrays.length} streamlines with ${particleSystem?.mode || 'cpu'} particles (xz rot ${streamRotDegInput.value || 0} deg, source z off ${streamZOffsetInput.value || 0} m).`
+        );
+      } catch (err) {
+        setStatus(`Failed to load streamlines ${path}: ${err?.message || err}`);
+      }
+    }
+
     function fitCameraToLoadedContent() {
       const box = new THREE.Box3();
       let hasContent = false;
@@ -242,6 +957,10 @@
       }
       if (frozenRoot) {
         box.expandByObject(frozenRoot);
+        hasContent = true;
+      }
+      if (streamlineRoot) {
+        box.expandByObject(streamlineRoot);
         hasContent = true;
       }
       if (!hasContent || box.isEmpty()) return;
@@ -256,6 +975,7 @@
       camera.far = Math.max(radius * 60, 50);
       camera.updateProjectionMatrix();
       controls.update();
+      requestRender();
     }
 
     function fitCameraToObject(object3D) {
@@ -270,6 +990,7 @@
       camera.far = Math.max(radius * 60, 50);
       camera.updateProjectionMatrix();
       controls.update();
+      requestRender();
     }
 
     function onModelLoaded(gltf, sourceName) {
@@ -278,6 +999,7 @@
       scene.add(activeRoot);
       fitCameraToLoadedContent();
       setStatus(`Loaded: ${sourceName}`);
+      requestRender();
     }
 
     function parseFrozenCsv(text) {
@@ -384,8 +1106,10 @@
         }
 
         scene.add(frozenRoot);
+        applyVisibilityToggles();
         fitCameraToLoadedContent();
         setStatus(`Loaded model + ${frozenRoot.children.length} frozen vectors.`);
+        requestRender();
       } catch (err) {
         setStatus(`Failed to load frozen vectors ${path}: ${err?.message || err}`);
       }
@@ -425,13 +1149,71 @@
 
     loadPathBtn.addEventListener('click', () => loadFromPath(pathInput.value.trim()));
     loadFrozenBtn.addEventListener('click', () => loadFrozenVectors(frozenPathInput.value.trim()));
+    loadStreamBtn.addEventListener('click', () => loadStreamlineJson(streamPathInput.value.trim()));
+    applyRotBtn.addEventListener('click', () => {
+      applyStreamlineTransform();
+      setStatus(
+        `Applied streamline transform: x-z rot ${streamRotDegInput.value || 0} deg, source z off ${streamZOffsetInput.value || 0} m`
+      );
+      requestRender();
+    });
+    streamRotDegInput.addEventListener('change', () => {
+      applyStreamlineTransform();
+      requestRender();
+    });
+    streamZOffsetInput.addEventListener('change', () => {
+      applyStreamlineTransform();
+      requestRender();
+    });
+    toggleVectorsBtn.addEventListener('click', () => {
+      vectorsVisible = !vectorsVisible;
+      applyVisibilityToggles();
+      requestRender();
+    });
+    toggleLinesBtn.addEventListener('click', () => {
+      streamlinesVisible = !streamlinesVisible;
+      applyVisibilityToggles();
+      requestRender();
+    });
+    toggleParticlesBtn.addEventListener('click', () => {
+      particlesVisible = !particlesVisible;
+      applyVisibilityToggles();
+      requestRender();
+    });
+    particleCountInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      rebuildParticlesOnly();
+    });
+    particleSizeInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      applyParticleOptionsLive();
+    });
+    particleSpeedInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      applyParticleOptionsLive();
+    });
+    trailLengthInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      applyParticleOptionsLive();
+    });
+    particleSaturationInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      rebuildParticlesOnly();
+    });
+    particleBrightnessInput.addEventListener('input', () => {
+      refreshParticleControlLabels();
+      applyParticleOptionsLive();
+    });
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
       loadFromFile(file);
     });
     fitBtn.addEventListener('click', () => {
       fitCameraToLoadedContent();
+      requestRender();
     });
+
+    controls.addEventListener('change', requestRender);
 
     const url = new URL(window.location.href);
     const modelParam = url.searchParams.get('model');
@@ -442,21 +1224,79 @@
     if (frozenParam) {
       frozenPathInput.value = frozenParam;
     }
+    const streamParam = url.searchParams.get('stream');
+    if (streamParam) {
+      streamPathInput.value = streamParam;
+    }
+    const streamRotRaw = url.searchParams.get('streamRotDeg');
+    if (streamRotRaw !== null) {
+      const streamRotParam = Number(streamRotRaw);
+      if (Number.isFinite(streamRotParam)) {
+        streamRotDegInput.value = String(streamRotParam);
+      }
+    }
+    const streamZOffsetRaw = url.searchParams.get('streamZOffset');
+    if (streamZOffsetRaw !== null) {
+      const streamZOffsetParam = Number(streamZOffsetRaw);
+      if (Number.isFinite(streamZOffsetParam)) {
+        streamZOffsetInput.value = String(streamZOffsetParam);
+      }
+    }
+    const particleCountRaw = url.searchParams.get('particleCount');
+    if (particleCountRaw !== null) {
+      const particleCountParam = Number(particleCountRaw);
+      if (Number.isFinite(particleCountParam)) {
+        particleCountInput.value = String(Math.max(1, Math.min(50, Math.round(particleCountParam))));
+      }
+    }
+    const particleSizeRaw = url.searchParams.get('particleSize');
+    if (particleSizeRaw !== null) {
+      const particleSizeParam = Number(particleSizeRaw);
+      if (Number.isFinite(particleSizeParam)) {
+        particleSizeInput.value = String(Math.max(0.05, Math.min(10, particleSizeParam)));
+      }
+    }
+    const particleSpeedRaw = url.searchParams.get('particleSpeed');
+    if (particleSpeedRaw !== null) {
+      const particleSpeedParam = Number(particleSpeedRaw);
+      if (Number.isFinite(particleSpeedParam)) {
+        particleSpeedInput.value = String(Math.max(0.1, Math.min(3.0, particleSpeedParam)));
+      }
+    }
+    const trailLengthRaw = url.searchParams.get('trailLength');
+    if (trailLengthRaw !== null) {
+      const trailLengthParam = Number(trailLengthRaw);
+      if (Number.isFinite(trailLengthParam)) {
+        trailLengthInput.value = String(Math.max(0.0, Math.min(0.8, trailLengthParam)));
+      }
+    }
+    const particleSaturationRaw = url.searchParams.get('particleSaturation');
+    if (particleSaturationRaw !== null) {
+      const particleSaturationParam = Number(particleSaturationRaw);
+      if (Number.isFinite(particleSaturationParam)) {
+        particleSaturationInput.value = String(Math.max(0.0, Math.min(1.0, particleSaturationParam)));
+      }
+    }
+    const particleBrightnessRaw = url.searchParams.get('particleBrightness');
+    if (particleBrightnessRaw !== null) {
+      const particleBrightnessParam = Number(particleBrightnessRaw);
+      if (Number.isFinite(particleBrightnessParam)) {
+        particleBrightnessInput.value = String(Math.max(0.1, Math.min(1.4, particleBrightnessParam)));
+      }
+    }
+    refreshParticleControlLabels();
+    updateVisibilityButtons();
     loadFromPath(pathInput.value.trim());
     loadFrozenVectors(frozenPathInput.value.trim());
+    loadStreamlineJson(streamPathInput.value.trim());
+    requestRender();
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
+      requestRender();
     });
-
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
   </script>
 </body>
 </html>

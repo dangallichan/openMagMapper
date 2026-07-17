@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openMagMapper Psi-Contours Viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0b0f14;
+      color: #e6edf3;
+      font-family: Segoe UI, Tahoma, sans-serif;
+    }
+    #app {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+    #hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 10;
+      background: rgba(10, 14, 20, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      padding: 10px 12px;
+      backdrop-filter: blur(4px);
+      max-width: min(94vw, 760px);
+    }
+    #hud h1 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    #controls, #particleControls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #particleControls {
+      margin-top: 8px;
+      gap: 6px 10px;
+      font-size: 12px;
+    }
+    .pctl {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(18, 28, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
+      padding: 3px 6px;
+      line-height: 1;
+    }
+    .pctl input[type="range"] {
+      width: 92px;
+      accent-color: #6fd8ff;
+    }
+    .pctl .pv {
+      min-width: 42px;
+      text-align: right;
+      opacity: 0.95;
+    }
+    input[type="text"], input[type="number"] {
+      background: #101722;
+      color: #e6edf3;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      height: 30px;
+      padding: 0 8px;
+    }
+    input[type="text"] {
+      width: min(420px, 65vw);
+    }
+    button {
+      height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 7px;
+      background: #172232;
+      color: #e6edf3;
+      padding: 0 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      font-size: 13px;
+    }
+    button:hover {
+      background: #203148;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 12px;
+      opacity: 0.92;
+      min-height: 1.2em;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="hud">
+      <h1>openMagMapper Psi-Contours Revolved Viewer</h1>
+      <div id="controls">
+        <input id="modelPath" type="text" value="../dataKeep/magnetOnTable94_aligned.glb" title="Optional model path" />
+        <button id="loadModelBtn" type="button">Load Model</button>
+        <input id="psiPath" type="text" value="../simulatedFields/exports/test_solenoid_psi_contours_2d.json" title="psiContours2d JSON path" />
+        <button id="loadPsiBtn" type="button">Load Psi Contours</button>
+        <input id="thetaSamples" type="number" value="96" min="8" max="360" step="1" title="Number of cylindrical samples" style="width: 90px;" />
+        <input id="streamRotDeg" type="number" value="90" step="1" title="Rotate in x-z plane (deg)" style="width: 92px;" />
+        <input id="streamZOffset" type="number" value="0.05" step="0.001" title="Source-frame z offset (m)" style="width: 96px;" />
+        <button id="applyTransformBtn" type="button">Apply XZ+Z</button>
+        <button id="toggleLinesBtn" type="button">Hide Streamlines</button>
+        <button id="toggleParticlesBtn" type="button">Hide Particles</button>
+        <button id="fitBtn" type="button">Fit Camera</button>
+      </div>
+
+      <div id="particleControls">
+        <div class="pctl"><span>count</span><input id="particleCount" type="range" min="50" max="2000" step="10" value="500" /><span id="particleCountVal" class="pv">500</span></div>
+        <div class="pctl"><span>size</span><input id="particleSize" type="range" min="0.05" max="10" step="0.05" value="1" /><span id="particleSizeVal" class="pv">1.00</span></div>
+        <div class="pctl"><span>speed</span><input id="particleSpeed" type="range" min="0.1" max="3" step="0.1" value="1.0" /><span id="particleSpeedVal" class="pv">1.0x</span></div>
+        <div class="pctl"><span>trail</span><input id="trailLength" type="range" min="0" max="0.8" step="0.02" value="0.16" /><span id="trailLengthVal" class="pv">0.16</span></div>
+        <div class="pctl"><span>saturation</span><input id="particleSaturation" type="range" min="0" max="1" step="0.05" value="0.8" /><span id="particleSaturationVal" class="pv">0.80</span></div>
+        <div class="pctl"><span>brightness</span><input id="particleBrightness" type="range" min="0.1" max="1.4" step="0.05" value="0.8" /><span id="particleBrightnessVal" class="pv">0.80</span></div>
+      </div>
+
+      <div id="status">Ready.</div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const app = document.getElementById('app');
+    const statusEl = document.getElementById('status');
+
+    const modelPathInput = document.getElementById('modelPath');
+    const loadModelBtn = document.getElementById('loadModelBtn');
+    const psiPathInput = document.getElementById('psiPath');
+    const loadPsiBtn = document.getElementById('loadPsiBtn');
+    const thetaSamplesInput = document.getElementById('thetaSamples');
+    const streamRotDegInput = document.getElementById('streamRotDeg');
+    const streamZOffsetInput = document.getElementById('streamZOffset');
+    const applyTransformBtn = document.getElementById('applyTransformBtn');
+    const toggleLinesBtn = document.getElementById('toggleLinesBtn');
+    const toggleParticlesBtn = document.getElementById('toggleParticlesBtn');
+    const fitBtn = document.getElementById('fitBtn');
+
+    const particleCountInput = document.getElementById('particleCount');
+    const particleSizeInput = document.getElementById('particleSize');
+    const particleSpeedInput = document.getElementById('particleSpeed');
+    const trailLengthInput = document.getElementById('trailLength');
+    const particleSaturationInput = document.getElementById('particleSaturation');
+    const particleBrightnessInput = document.getElementById('particleBrightness');
+
+    const particleCountVal = document.getElementById('particleCountVal');
+    const particleSizeVal = document.getElementById('particleSizeVal');
+    const particleSpeedVal = document.getElementById('particleSpeedVal');
+    const trailLengthVal = document.getElementById('trailLengthVal');
+    const particleSaturationVal = document.getElementById('particleSaturationVal');
+    const particleBrightnessVal = document.getElementById('particleBrightnessVal');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    app.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0f14);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1500);
+    camera.position.set(1.9, 1.1, 2.4);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false;
+    controls.target.set(0, 0, 0);
+
+    scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x141b22, 1.1));
+    const key = new THREE.DirectionalLight(0xffffff, 1.3);
+    key.position.set(2.6, 3.0, 2.0);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x9fc9ff, 0.5);
+    fill.position.set(-2.2, 1.4, -1.5);
+    scene.add(fill);
+
+    const grid = new THREE.GridHelper(10, 40, 0x35506f, 0x243447);
+    grid.material.opacity = 0.28;
+    grid.material.transparent = true;
+    scene.add(grid);
+    scene.add(new THREE.AxesHelper(0.3));
+
+    const gltfLoader = new GLTFLoader();
+
+    let modelRoot = null;
+    let psiRoot = null;
+    let lineGroup = null;
+    let particleSystem = null;
+    let paths = [];
+    let contourCount = 0;
+    let particleTime = 0;
+
+    let linesVisible = true;
+    let particlesVisible = true;
+
+    const clock = new THREE.Clock();
+    let animStarted = false;
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function requestRender() {
+      renderer.render(scene, camera);
+    }
+
+    function updateToggleButtons() {
+      toggleLinesBtn.textContent = linesVisible ? 'Hide Streamlines' : 'Show Streamlines';
+      toggleParticlesBtn.textContent = particlesVisible ? 'Hide Particles' : 'Show Particles';
+    }
+
+    function applyVisibility() {
+      if (lineGroup) lineGroup.visible = linesVisible;
+      if (particleSystem?.points) particleSystem.points.visible = particlesVisible;
+      updateToggleButtons();
+    }
+
+    function readParticleOptions() {
+      return {
+        count: Math.max(10, Number(particleCountInput.value) | 0),
+        size: Math.max(0.05, Number(particleSizeInput.value)),
+        speedScale: Math.max(0.01, Number(particleSpeedInput.value)),
+        trailLength: Math.max(0.0, Math.min(0.95, Number(trailLengthInput.value))),
+        saturation: Math.max(0.0, Math.min(1.0, Number(particleSaturationInput.value))),
+        brightness: Math.max(0.05, Math.min(1.6, Number(particleBrightnessInput.value))),
+      };
+    }
+
+    function refreshParticleLabels() {
+      const o = readParticleOptions();
+      particleCountVal.textContent = `${o.count}`;
+      particleSizeVal.textContent = `${o.size.toFixed(2)}`;
+      particleSpeedVal.textContent = `${o.speedScale.toFixed(1)}x`;
+      trailLengthVal.textContent = `${o.trailLength.toFixed(2)}`;
+      particleSaturationVal.textContent = `${o.saturation.toFixed(2)}`;
+      particleBrightnessVal.textContent = `${o.brightness.toFixed(2)}`;
+    }
+
+    function disposeObject3D(root) {
+      if (!root) return;
+      root.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) if (m && m.dispose) m.dispose();
+      });
+    }
+
+    function clearModel() {
+      if (!modelRoot) return;
+      scene.remove(modelRoot);
+      disposeObject3D(modelRoot);
+      modelRoot = null;
+    }
+
+    function clearPsi() {
+      if (!psiRoot) return;
+      scene.remove(psiRoot);
+      disposeObject3D(psiRoot);
+      psiRoot = null;
+      lineGroup = null;
+      paths = [];
+      particleSystem = null;
+      contourCount = 0;
+      particleTime = 0;
+    }
+
+    function applyPsiTransform() {
+      if (!psiRoot) return;
+      const deg = Number(streamRotDegInput.value);
+      const rad = Number.isFinite(deg) ? (deg * Math.PI) / 180.0 : 0.0;
+      const zOff = Number(streamZOffsetInput.value);
+      const z = Number.isFinite(zOff) ? zOff : 0;
+
+      // Keep same semantics as the existing viewer: rotate in XZ (about +Y),
+      // and source-frame z offset mapped to viewer Y.
+      psiRoot.rotation.set(0, rad, 0);
+      psiRoot.position.set(0, z, 0);
+    }
+
+    function fitCamera() {
+      const box = new THREE.Box3();
+      let has = false;
+      if (modelRoot) {
+        box.expandByObject(modelRoot);
+        has = true;
+      }
+      if (psiRoot) {
+        box.expandByObject(psiRoot);
+        has = true;
+      }
+      if (!has || box.isEmpty()) return;
+
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(size.x, size.y, size.z) * 0.55 || 0.5;
+
+      controls.target.copy(center);
+      camera.position.copy(center).add(new THREE.Vector3(radius * 2.0, radius * 1.4, radius * 2.2));
+      camera.near = Math.max(radius / 500, 0.001);
+      camera.far = Math.max(radius * 80, 50);
+      camera.updateProjectionMatrix();
+      controls.update();
+      requestRender();
+    }
+
+    function loadModel(path) {
+      if (!path) return;
+      setStatus(`Loading model ${path} ...`);
+      gltfLoader.load(
+        path,
+        (gltf) => {
+          clearModel();
+          modelRoot = gltf.scene;
+          scene.add(modelRoot);
+          fitCamera();
+          setStatus(`Loaded model: ${path}`);
+        },
+        undefined,
+        (err) => setStatus(`Model load failed: ${err?.message || err}`)
+      );
+    }
+
+    function unpackContours2D(packed, bmagValues) {
+      const counts = Array.isArray(packed?.counts) ? packed.counts : [];
+      const pos = Array.isArray(packed?.positions2d) ? packed.positions2d : [];
+      const bvals = Array.isArray(bmagValues) ? bmagValues : [];
+
+      const contours = [];
+      let pCursor = 0;
+      let bCursor = 0;
+      for (const cRaw of counts) {
+        const n = Math.max(0, Number(cRaw) | 0);
+        const need = pCursor + n * 2;
+        if (n < 2 || need > pos.length) {
+          pCursor = need;
+          bCursor += n;
+          continue;
+        }
+
+        const xs = new Float32Array(n);
+        const rs = new Float32Array(n);
+        const bs = new Float32Array(n);
+
+        for (let i = 0; i < n; i++) {
+          xs[i] = Number(pos[pCursor + i * 2]);
+          rs[i] = Math.max(0, Number(pos[pCursor + i * 2 + 1]));
+          bs[i] = Number.isFinite(bvals[bCursor + i]) ? Number(bvals[bCursor + i]) : NaN;
+        }
+
+        contours.push({ x: xs, rho: rs, bmag: bs });
+        pCursor += n * 2;
+        bCursor += n;
+      }
+      return contours;
+    }
+
+    function computePathCumulative(pathPos) {
+      const n = (pathPos.length / 3) | 0;
+      const cum = new Float32Array(n);
+      let total = 0;
+      for (let i = 1; i < n; i++) {
+        const a = (i - 1) * 3;
+        const b = i * 3;
+        const dx = pathPos[b] - pathPos[a];
+        const dy = pathPos[b + 1] - pathPos[a + 1];
+        const dz = pathPos[b + 2] - pathPos[a + 2];
+        total += Math.sqrt(dx * dx + dy * dy + dz * dz);
+        cum[i] = total;
+      }
+      return { cumulative: cum, total };
+    }
+
+    function samplePathAndB(path, distance) {
+      const n = (path.positions.length / 3) | 0;
+      if (n < 2 || path.total <= 1e-9) {
+        return { p: [0, 0, 0], bNorm: 0.5 };
+      }
+      const d = Math.max(0, Math.min(path.total, distance));
+      const cum = path.cumulative;
+
+      let lo = 0;
+      let hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] < d) lo = mid + 1;
+        else hi = mid;
+      }
+
+      const i1 = Math.max(1, lo);
+      const i0 = i1 - 1;
+      const d0 = cum[i0];
+      const d1 = cum[i1];
+      const u = d1 > d0 ? (d - d0) / (d1 - d0) : 0;
+
+      const j0 = i0 * 3;
+      const j1 = i1 * 3;
+      const p = [
+        path.positions[j0] * (1 - u) + path.positions[j1] * u,
+        path.positions[j0 + 1] * (1 - u) + path.positions[j1 + 1] * u,
+        path.positions[j0 + 2] * (1 - u) + path.positions[j1 + 2] * u,
+      ];
+
+      const b0 = path.bmagNorm[i0];
+      const b1 = path.bmagNorm[i1];
+      const bNorm = b0 * (1 - u) + b1 * u;
+      return { p, bNorm };
+    }
+
+    function bNormToColor(bNorm, saturation, brightness) {
+      const t = Math.max(0, Math.min(1, bNorm));
+      const hue = 0.62 - 0.56 * t;
+      const light = 0.50 + 0.08 * (1 - t);
+      return new THREE.Color().setHSL(hue, saturation, Math.max(0, Math.min(1, light))).multiplyScalar(brightness);
+    }
+
+    function buildPsiGeometryAndPaths(contours2d, thetaSamples, bMin, bMax) {
+      const root = new THREE.Group();
+      root.name = 'PsiContoursRevolved';
+
+      const lg = new THREE.Group();
+      lg.name = 'PsiLines';
+      root.add(lg);
+
+      const outPaths = [];
+      const thetaN = Math.max(8, thetaSamples | 0);
+
+      for (const c of contours2d) {
+        const n = c.x.length;
+        if (n < 2) continue;
+
+        const bNormCurve = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const bv = c.bmag[i];
+          if (!Number.isFinite(bv) || bMax <= bMin) bNormCurve[i] = 0.5;
+          else bNormCurve[i] = Math.max(0, Math.min(1, (bv - bMin) / (bMax - bMin)));
+        }
+
+        for (let ti = 0; ti < thetaN; ti++) {
+          const theta = (2.0 * Math.PI * ti) / thetaN;
+          const ct = Math.cos(theta);
+          const st = Math.sin(theta);
+
+          const pos = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) {
+            const rho = c.rho[i];
+            pos[i * 3] = c.x[i];
+            pos[i * 3 + 1] = rho * ct;
+            pos[i * 3 + 2] = rho * st;
+          }
+
+          const stats = computePathCumulative(pos);
+          const path = {
+            positions: pos,
+            cumulative: stats.cumulative,
+            total: stats.total,
+            bmagNorm: bNormCurve,
+            meanB: bNormCurve.reduce((a, b) => a + b, 0) / Math.max(1, bNormCurve.length),
+          };
+
+          outPaths.push(path);
+
+          const lineGeo = new THREE.BufferGeometry();
+          lineGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          const lineMat = new THREE.LineBasicMaterial({
+            color: bNormToColor(path.meanB, 0.85, 0.9),
+            transparent: true,
+            opacity: 0.42,
+          });
+          lg.add(new THREE.Line(lineGeo, lineMat));
+        }
+      }
+
+      return { root, lineGroup: lg, paths: outPaths };
+    }
+
+    function buildCpuParticles(pathsIn, options) {
+      if (!pathsIn.length) return null;
+      const logicalCount = Math.max(10, options.count | 0);
+      const trailSteps = 8;
+      const pointCount = logicalCount * trailSteps;
+
+      const positions = new Float32Array(pointCount * 3);
+      const colors = new Float32Array(pointCount * 3);
+      const pathIndices = new Uint32Array(logicalCount);
+      const leadDistances = new Float32Array(logicalCount);
+      const leadSpeeds = new Float32Array(logicalCount);
+
+      for (let i = 0; i < logicalCount; i++) {
+        const pIdx = i % pathsIn.length;
+        pathIndices[i] = pIdx;
+        leadDistances[i] = Math.random() * Math.max(1e-6, pathsIn[pIdx].total);
+        const baseSpeed = 0.035 + 0.055 * pathsIn[pIdx].meanB;
+        leadSpeeds[i] = baseSpeed;
+
+        for (let s = 0; s < trailSteps; s++) {
+          const idx = i * trailSteps + s;
+          const fade = 1.0 - s / Math.max(1, trailSteps - 1);
+          const c = bNormToColor(pathsIn[pIdx].meanB, options.saturation, options.brightness).multiplyScalar(0.35 + 0.65 * fade);
+          colors[idx * 3] = c.r;
+          colors[idx * 3 + 1] = c.g;
+          colors[idx * 3 + 2] = c.b;
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      const mat = new THREE.PointsMaterial({
+        size: 0.0015 * options.size,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: Math.max(0.08, Math.min(1.0, 0.88 * options.brightness)),
+        depthWrite: false,
+      });
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+
+      return {
+        mode: 'cpu',
+        points,
+        positions,
+        colors,
+        pathIndices,
+        leadDistances,
+        leadSpeeds,
+        trailSteps,
+        options,
+      };
+    }
+
+    function rebuildParticles() {
+      if (!psiRoot || !paths.length) return;
+      if (particleSystem?.points) psiRoot.remove(particleSystem.points);
+      if (particleSystem?.points) disposeObject3D(particleSystem.points);
+
+      particleSystem = buildCpuParticles(paths, readParticleOptions());
+      if (particleSystem?.points) psiRoot.add(particleSystem.points);
+      applyVisibility();
+      particleTime = 0;
+      requestRender();
+    }
+
+    function updateParticles(dt) {
+      if (!particleSystem || !paths.length) return;
+      const tSteps = particleSystem.trailSteps;
+      const opt = particleSystem.options;
+
+      for (let i = 0; i < particleSystem.pathIndices.length; i++) {
+        const pIdx = particleSystem.pathIndices[i];
+        const path = paths[pIdx];
+        if (!path || path.total <= 1e-9) continue;
+
+        particleSystem.leadDistances[i] += particleSystem.leadSpeeds[i] * dt * opt.speedScale;
+        if (particleSystem.leadDistances[i] >= path.total) {
+          particleSystem.leadDistances[i] = Math.random() * (0.2 * path.total);
+        }
+
+        for (let s = 0; s < tSteps; s++) {
+          const idx = i * tSteps + s;
+          const lag = opt.trailLength * path.total * (s / Math.max(1, tSteps - 1));
+          const sample = samplePathAndB(path, particleSystem.leadDistances[i] - lag);
+          particleSystem.positions[idx * 3] = sample.p[0];
+          particleSystem.positions[idx * 3 + 1] = sample.p[1];
+          particleSystem.positions[idx * 3 + 2] = sample.p[2];
+
+          const fade = 1.0 - s / Math.max(1, tSteps - 1);
+          const c = bNormToColor(sample.bNorm, opt.saturation, opt.brightness).multiplyScalar(0.35 + 0.65 * fade);
+          particleSystem.colors[idx * 3] = c.r;
+          particleSystem.colors[idx * 3 + 1] = c.g;
+          particleSystem.colors[idx * 3 + 2] = c.b;
+        }
+      }
+
+      const g = particleSystem.points.geometry;
+      g.attributes.position.needsUpdate = true;
+      g.attributes.color.needsUpdate = true;
+      particleSystem.points.material.size = 0.0015 * opt.size;
+      particleSystem.points.material.opacity = Math.max(0.08, Math.min(1.0, 0.88 * opt.brightness));
+    }
+
+    function startAnimation() {
+      if (animStarted) return;
+      animStarted = true;
+
+      function tick() {
+        const dt = Math.min(clock.getDelta(), 0.05);
+        updateParticles(dt);
+        renderer.render(scene, camera);
+        requestAnimationFrame(tick);
+      }
+
+      clock.getDelta();
+      requestAnimationFrame(tick);
+    }
+
+    async function loadPsiContours(path) {
+      if (!path) {
+        setStatus('Enter a psiContours JSON path first.');
+        return;
+      }
+      setStatus(`Loading psi contours from ${path} ...`);
+
+      try {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const payload = await res.json();
+        const packed = payload?.contours2d?.resampled || payload?.contours2d?.raw;
+        if (!packed) throw new Error('JSON does not contain contours2d raw/resampled blocks.');
+
+        const bmagValues = packed?.bmag_values || [];
+        const contours2d = unpackContours2D(packed, bmagValues);
+        if (!contours2d.length) throw new Error('No valid contours found in JSON.');
+
+        const fieldStats = payload?.field_stats || {};
+        let bMin = Number(fieldStats.bmag_min);
+        let bMax = Number(fieldStats.bmag_max);
+        if (!Number.isFinite(bMin) || !Number.isFinite(bMax) || bMax <= bMin) {
+          const vals = bmagValues.filter((v) => Number.isFinite(Number(v))).map(Number);
+          bMin = vals.length ? Math.min(...vals) : 0;
+          bMax = vals.length ? Math.max(...vals) : 1;
+        }
+
+        const thetaSuggest = Number(payload?.frame?.theta_suggest_samples);
+        if (Number.isFinite(thetaSuggest) && thetaSuggest >= 8) {
+          thetaSamplesInput.value = String(Math.round(thetaSuggest));
+        }
+
+        clearPsi();
+        contourCount = contours2d.length;
+
+        const thetaSamples = Math.max(8, Number(thetaSamplesInput.value) | 0);
+        const built = buildPsiGeometryAndPaths(contours2d, thetaSamples, bMin, bMax);
+        psiRoot = built.root;
+        lineGroup = built.lineGroup;
+        paths = built.paths;
+
+        scene.add(psiRoot);
+        applyPsiTransform();
+        rebuildParticles();
+        applyVisibility();
+        fitCamera();
+        startAnimation();
+
+        setStatus(
+          `Loaded ${contourCount} contours -> ${paths.length} revolved paths | bmag [${bMin.toFixed(2)}, ${bMax.toFixed(2)}]`
+        );
+      } catch (err) {
+        setStatus(`Failed to load psi contours ${path}: ${err?.message || err}`);
+      }
+    }
+
+    function applyParticleOptionsLive() {
+      if (!particleSystem) return;
+      particleSystem.options = readParticleOptions();
+      requestRender();
+    }
+
+    loadModelBtn.addEventListener('click', () => loadModel(modelPathInput.value.trim()));
+    loadPsiBtn.addEventListener('click', () => loadPsiContours(psiPathInput.value.trim()));
+
+    applyTransformBtn.addEventListener('click', () => {
+      applyPsiTransform();
+      setStatus(`Applied transform: x-z rot ${streamRotDegInput.value || 0} deg, source z off ${streamZOffsetInput.value || 0} m`);
+      requestRender();
+    });
+
+    streamRotDegInput.addEventListener('change', () => { applyPsiTransform(); requestRender(); });
+    streamZOffsetInput.addEventListener('change', () => { applyPsiTransform(); requestRender(); });
+
+    toggleLinesBtn.addEventListener('click', () => {
+      linesVisible = !linesVisible;
+      applyVisibility();
+      requestRender();
+    });
+
+    toggleParticlesBtn.addEventListener('click', () => {
+      particlesVisible = !particlesVisible;
+      applyVisibility();
+      requestRender();
+    });
+
+    thetaSamplesInput.addEventListener('change', () => {
+      if (!psiRoot || contourCount <= 0) return;
+      // Re-load from current path so revolution count updates consistently.
+      loadPsiContours(psiPathInput.value.trim());
+    });
+
+    particleCountInput.addEventListener('input', () => { refreshParticleLabels(); rebuildParticles(); });
+    particleSizeInput.addEventListener('input', () => { refreshParticleLabels(); applyParticleOptionsLive(); });
+    particleSpeedInput.addEventListener('input', () => { refreshParticleLabels(); applyParticleOptionsLive(); });
+    trailLengthInput.addEventListener('input', () => { refreshParticleLabels(); applyParticleOptionsLive(); });
+    particleSaturationInput.addEventListener('input', () => { refreshParticleLabels(); applyParticleOptionsLive(); });
+    particleBrightnessInput.addEventListener('input', () => { refreshParticleLabels(); applyParticleOptionsLive(); });
+
+    fitBtn.addEventListener('click', fitCamera);
+    controls.addEventListener('change', requestRender);
+
+    const url = new URL(window.location.href);
+    const modelParam = url.searchParams.get('model');
+    if (modelParam) modelPathInput.value = modelParam;
+    const psiParam = url.searchParams.get('psi');
+    if (psiParam) psiPathInput.value = psiParam;
+
+    const maybeNumberParam = (name) => {
+      const raw = url.searchParams.get(name);
+      if (raw === null) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const thetaParam = maybeNumberParam('thetaSamples');
+    if (thetaParam !== null) thetaSamplesInput.value = String(Math.max(8, Math.min(360, Math.round(thetaParam))));
+    const rotParam = maybeNumberParam('streamRotDeg');
+    if (rotParam !== null) streamRotDegInput.value = String(rotParam);
+    const zParam = maybeNumberParam('streamZOffset');
+    if (zParam !== null) streamZOffsetInput.value = String(zParam);
+
+    const pCount = maybeNumberParam('particleCount');
+    if (pCount !== null) particleCountInput.value = String(Math.max(50, Math.min(2000, Math.round(pCount))));
+    const pSize = maybeNumberParam('particleSize');
+    if (pSize !== null) particleSizeInput.value = String(Math.max(0.05, Math.min(10, pSize)));
+    const pSpeed = maybeNumberParam('particleSpeed');
+    if (pSpeed !== null) particleSpeedInput.value = String(Math.max(0.1, Math.min(3, pSpeed)));
+    const pTrail = maybeNumberParam('trailLength');
+    if (pTrail !== null) trailLengthInput.value = String(Math.max(0, Math.min(0.8, pTrail)));
+    const pSat = maybeNumberParam('particleSaturation');
+    if (pSat !== null) particleSaturationInput.value = String(Math.max(0, Math.min(1, pSat)));
+    const pBri = maybeNumberParam('particleBrightness');
+    if (pBri !== null) particleBrightnessInput.value = String(Math.max(0.1, Math.min(1.4, pBri)));
+
+    refreshParticleLabels();
+    updateToggleButtons();
+
+    loadModel(modelPathInput.value.trim());
+    loadPsiContours(psiPathInput.value.trim());
+    requestRender();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      requestRender();
+    });
+  </script>
+</body>
+</html>

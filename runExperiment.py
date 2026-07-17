@@ -79,6 +79,11 @@ outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{CAMERA_NAM
 outputDataFile = os.path.join(outputVideoDir, f'Exp_cam_outputData_{CAMERA_NAME}_{recordingTimestamp}.csv')
 outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{CAMERA_NAME}_{recordingTimestamp}.csv')
 
+# External live-view option (vectors only).
+# True  -> append frozen vectors to CSV so the WebGL live viewer can poll updates.
+# False -> keep vectors local in OpenCV only (no external live vector feed).
+SEND_VECTORS_TO_EXTERNAL_LIVE_VIEW = True
+
 
 # --- Spatial models and camera calibration ---------------------------------
 # board88 is the cube board carrying the sensor; tableboard is the desk reference
@@ -171,6 +176,10 @@ frozenVectorsWriter.writerow([
 print(f"Saving video to {outputVideoFile}")
 print(f"Saving data to {outputDataFile}")
 print(f"Saving frozen vectors to {outputFrozenVectorsFile}")
+if SEND_VECTORS_TO_EXTERNAL_LIVE_VIEW:
+    print("External live vector feed: enabled")
+else:
+    print("External live vector feed: disabled")
 
 # --- Display, coordinate transforms, and serial settings -------------------
 # ArUco markers/axes are translucent; magnetic arrows remain opaque for clarity.
@@ -605,17 +614,19 @@ while True:
                         'raw_vec_table_ut': frozenRawVecTableUT,
                         'magnitude_ut': float(np.linalg.norm(lastMagRawVectorUT)),
                     })
-                    frozenVectorsWriter.writerow([
-                        len(frozenVectorsTable),
-                        datetime.now().isoformat(timespec='milliseconds'),
-                        iFrame,
-                        frozenOriginTableM[0],
-                        frozenOriginTableM[1],
-                        frozenOriginTableM[2],
-                        frozenRawVecTableUT[0],
-                        frozenRawVecTableUT[1],
-                        frozenRawVecTableUT[2],
-                    ])
+                    if SEND_VECTORS_TO_EXTERNAL_LIVE_VIEW:
+                        frozenVectorsWriter.writerow([
+                            len(frozenVectorsTable),
+                            datetime.now().isoformat(timespec='milliseconds'),
+                            iFrame,
+                            frozenOriginTableM[0],
+                            frozenOriginTableM[1],
+                            frozenOriginTableM[2],
+                            frozenRawVecTableUT[0],
+                            frozenRawVecTableUT[1],
+                            frozenRawVecTableUT[2],
+                        ])
+                        frozenVectorsFileHandle.flush()
                     freeze_period_sec = 1.0 / max(AUTO_FREEZE_RATE_HZ, 1e-6)
                     nextAutoFreezeTime = now_mono + freeze_period_sec
                 else:
@@ -676,17 +687,19 @@ while True:
                     'raw_vec_table_ut': frozenRawVecTableUT,
                     'magnitude_ut': float(np.linalg.norm(lastMagRawVectorUT)),
                 })
-                frozenVectorsWriter.writerow([
-                    len(frozenVectorsTable),
-                    datetime.now().isoformat(timespec='milliseconds'),
-                    iFrame,
-                    frozenOriginTableM[0],
-                    frozenOriginTableM[1],
-                    frozenOriginTableM[2],
-                    frozenRawVecTableUT[0],
-                    frozenRawVecTableUT[1],
-                    frozenRawVecTableUT[2],
-                ])
+                if SEND_VECTORS_TO_EXTERNAL_LIVE_VIEW:
+                    frozenVectorsWriter.writerow([
+                        len(frozenVectorsTable),
+                        datetime.now().isoformat(timespec='milliseconds'),
+                        iFrame,
+                        frozenOriginTableM[0],
+                        frozenOriginTableM[1],
+                        frozenOriginTableM[2],
+                        frozenRawVecTableUT[0],
+                        frozenRawVecTableUT[1],
+                        frozenRawVecTableUT[2],
+                    ])
+                    frozenVectorsFileHandle.flush()
             else:
                 print("Space pressed, but vector freeze requires visible board88, tableboard, and a known vector.")
 
