@@ -16,7 +16,11 @@ Currently we have an **Arduino Nano BLE Sense Lite 33** (just because it was one
 
 ## Visualisation of measured data
 Here an example of measured vectors being displayed using WebGL / three.js:
-https://github.com/user-attachments/assets/a1e8f22c-1cc6-4b2a-8492-9f7c82214fc3
+
+
+https://github.com/user-attachments/assets/652d2f72-8408-4c3c-a439-826bf6ba9777
+
+
 
 ## Visualisation of simulated fields
 This is still very much at a stage of exploration to see what looks nice. Fields can be simulated using Python code and then three.js is used to visualise in a browser. The background is a photogrammetry capture generated using [https://dev.scaniverse.com/](https://dev.scaniverse.com/)
