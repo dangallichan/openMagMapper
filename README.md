@@ -1,6 +1,17 @@
 # openMagMapper
 ## An Open-Source project to manually map and visualize magnetic fields
 
+This project started out as a series of undergraduate student projects supervised by [Dr. Daniel Gallichan]()
+
+It progressed to its current stage during the [2026 MIC-HACK hackathon](https://hackathon.cubric.cf.ac.uk/)
+
+## Collecting data
+This video shows the process of data collection:
+https://github.com/user-attachments/assets/0b40d768-b4ec-4375-9766-30c398070e6c
+
+Currently we have an Arduino Nano BLE Sense Lite 33 (just because it was one that was already lying around...) that is used to get the data from a Melexis 90395 magnetometer (we have the evaluation board version: https://www.mouser.co.uk/en/ProductDetail/Melexis/EVB90395_TSSOP?qs=t7xnP681wgXpyjmR%2FlhWbw%3D%3D )
+
+
 
 ## Visualisation of simulated fields
 This is still very much at a stage of exploration to see what looks nice. Fields can be simulated using Python code and then three.js is used to visualise in a browser. The background is a photogrammetry capture generated using [https://dev.scaniverse.com/](https://dev.scaniverse.com/)
