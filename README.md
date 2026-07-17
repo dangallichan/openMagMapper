@@ -33,3 +33,11 @@ https://github.com/user-attachments/assets/fb33818a-8468-4997-8561-3551ac4e1404
 
 [Try it yourself here!](https://dangallichan.github.io/openMagMapper/)
 
+## Installation on your own PC
+So far we've only tested this on Windows machines - but it should be possible to get it to work on a Mac or Linux.
+
+Python Dependencies:
+- OpenCV (Python version!) `pip install opencv-python`
+- PySerial for getting streamed USB data `pip install pyserial`
+- SciPy for analytic magnetic field simulation
+- There are various other packages like 'bleak' in the environment.yml as we tested getting data via Bluetooth Low Energy - but so far USB is more stable
