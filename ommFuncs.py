@@ -4,6 +4,7 @@ Coordinate convention: OpenCV pose vectors transform points from an ArUco board
 frame into the camera frame. The helpers below use that convention consistently
 to move points and magnetic vectors between the cube, camera, and table frames.
 """
+import argparse
 
 import numpy as np
 import cv2
@@ -558,3 +559,15 @@ def open_camera_reproducible(preferred_indices, frame_width=None, frame_height=N
         cap.release()
 
     return None, None, tried
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--compress",
+        choices=["y", "n"],
+        default=None,
+        help="Whether to compress the output video (y/n). If omitted, you'll be asked at runtime.",
+    )
+    return parser.parse_args()
+
+args = parse_args()

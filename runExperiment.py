@@ -58,7 +58,24 @@ os.makedirs(outputVideoDir, exist_ok=True)
 
 recordingStart = datetime.now()
 recordingTimestamp = recordingStart.strftime('%Y%m%d_%H%M%S')
-outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{CAMERA_NAME}_{recordingTimestamp}.avi')
+# outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{CAMERA_NAME}_{recordingTimestamp}.avi')
+if omm.args.compress is not None:
+    compress_choice = omm.args.compress
+    print(f"[CLI arg] Compression: {'compressed' if compress_choice == 'y' else 'uncompressed'}")
+else:
+    while True:
+        compress_choice = input("Compress the output video? (y=compressed / n=uncompressed): ").strip().lower()
+        if compress_choice in ("y", "n"):
+            break
+        print("Please enter y or n.")
+
+if compress_choice == "y":
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")
+    videoExt = ".mp4"
+else:
+    fourcc = cv2.VideoWriter_fourcc(*"XVID")
+    videoExt = ".avi"
+outputVideoFile = os.path.join(outputVideoDir, f'Exp_cam_outputVideo_{CAMERA_NAME}_{recordingTimestamp}{videoExt}')
 outputDataFile = os.path.join(outputVideoDir, f'Exp_cam_outputData_{CAMERA_NAME}_{recordingTimestamp}.csv')
 outputFrozenVectorsFile = os.path.join(outputVideoDir, f'Exp_cam_frozenVectors_{CAMERA_NAME}_{recordingTimestamp}.csv')
 
@@ -105,7 +122,7 @@ frameRate = int(camCapture.get(cv2.CAP_PROP_FPS))
 if frameRate <= 0:
     frameRate = 30
 
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
+# fourcc = cv2.VideoWriter_fourcc(*'XVID')
 
 out = cv2.VideoWriter(outputVideoFile, fourcc, frameRate, (frameWidth, frameHeight))
 
