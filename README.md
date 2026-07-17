@@ -5,6 +5,10 @@ This project started out as a series of undergraduate student projects supervise
 
 It progressed to its current stage during the [2026 MIC-HACK hackathon](https://hackathon.cubric.cf.ac.uk/)
 
+Very much still 'works-in-progress' - but should be easily reproducible without too much specialist hardware. Hopefully the next iteration will be even easier to get setup...!
+
+All suggestions and contributions welcome. 
+
 ## Collecting data
 This video shows the process of data collection:
 
