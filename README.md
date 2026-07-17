@@ -31,5 +31,5 @@ https://github.com/user-attachments/assets/453fbb38-4c9b-403e-ac74-9029a45a4a90
 ### Example using particles
 https://github.com/user-attachments/assets/fb33818a-8468-4997-8561-3551ac4e1404
 
-
+[Try it yourself here!](https://dangallichan.github.io/openMagMapper/)
 
