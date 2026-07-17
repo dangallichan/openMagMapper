@@ -10,8 +10,7 @@ PORT = 8080
 
 def main():
     os.chdir(ROOT)
-    # url = f"http://127.0.0.1:{PORT}/viewer/index.html"
-    url = f"http://127.0.0.1:{PORT}/viewer/index_psiContours.html"
+    url = f"http://127.0.0.1:{PORT}/viewer/index.html"
     print(f"Serving {ROOT} at {url}")
     print("Press Ctrl+C to stop.")
     try:
