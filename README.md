@@ -7,7 +7,11 @@ It progressed to its current stage during the [2026 MIC-HACK hackathon](https://
 
 ## Collecting data
 This video shows the process of data collection:
-https://github.com/user-attachments/assets/0b40d768-b4ec-4375-9766-30c398070e6c
+
+
+https://github.com/user-attachments/assets/a0814f2e-aca3-4d9e-8632-c6631e6f8997
+
+
 
 Currently we have an Arduino Nano BLE Sense Lite 33 (just because it was one that was already lying around...) that is used to get the data from a Melexis 90395 magnetometer (we have the evaluation board version: https://www.mouser.co.uk/en/ProductDetail/Melexis/EVB90395_TSSOP?qs=t7xnP681wgXpyjmR%2FlhWbw%3D%3D )
 
