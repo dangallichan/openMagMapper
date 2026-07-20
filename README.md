@@ -5,6 +5,10 @@ This project started out as a series of undergraduate student projects supervise
 
 It progressed to its current stage during the [2026 MIC-HACK hackathon](https://hackathon.cubric.cf.ac.uk/)
 
+Very much still 'works-in-progress' - but should be easily reproducible without too much specialist hardware. Hopefully the next iteration will be even easier to get setup...!
+
+All suggestions and contributions welcome. 
+
 ## Collecting data
 This video shows the process of data collection:
 
@@ -29,7 +33,10 @@ This is still very much at a stage of exploration to see what looks nice. Fields
 https://github.com/user-attachments/assets/453fbb38-4c9b-403e-ac74-9029a45a4a90
 
 ### Example using particles
-https://github.com/user-attachments/assets/fb33818a-8468-4997-8561-3551ac4e1404
+
+https://github.com/user-attachments/assets/9c49c8cd-77cb-48b3-b7b0-67dcf483b7e6
+
+
 
 [Try it yourself here!](https://dangallichan.github.io/openMagMapper/)
 

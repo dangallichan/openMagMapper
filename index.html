@@ -30,11 +30,27 @@
       backdrop-filter: blur(4px);
       max-width: min(94vw, 760px);
     }
+    #hudHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
     #hud h1 {
-      margin: 0 0 8px 0;
+      margin: 0;
       font-size: 14px;
       font-weight: 600;
       letter-spacing: 0.02em;
+    }
+    #hud.collapsed #hudHeader {
+      margin-bottom: 0;
+    }
+    #hud.collapsed #hudBody {
+      display: none;
+    }
+    #toggleUiBtn {
+      flex: 0 0 auto;
     }
     #controls, #particleControls {
       display: flex;
@@ -106,31 +122,37 @@
 <body>
   <div id="app">
     <div id="hud">
-      <h1>openMagMapper Psi-Contours Revolved Viewer</h1>
-      <div id="controls">
-        <input id="modelPath" type="text" value="dataKeep/magnetOnTable94_aligned.glb" title="Optional model path" />
-        <button id="loadModelBtn" type="button">Load Model</button>
-        <input id="psiPath" type="text" value="simulatedFields/exports/test_solenoid_psi_contours_2d.json" title="psiContours2d JSON path" />
-        <button id="loadPsiBtn" type="button">Load Psi Contours</button>
-        <input id="thetaSamples" type="number" value="96" min="8" max="360" step="1" title="Number of cylindrical samples" style="width: 90px;" />
-        <input id="streamRotDeg" type="number" value="90" step="1" title="Rotate in x-z plane (deg)" style="width: 92px;" />
-        <input id="streamZOffset" type="number" value="0.015" step="0.001" title="Source-frame z offset (m)" style="width: 96px;" />
-        <button id="applyTransformBtn" type="button">Apply XZ+Z</button>
-        <button id="toggleLinesBtn" type="button">Hide Streamlines</button>
-        <button id="toggleParticlesBtn" type="button">Hide Particles</button>
-        <button id="fitBtn" type="button">Fit Camera</button>
+      <div id="hudHeader">
+        <h1>openMagMapper Psi-Contours Revolved Viewer</h1>
+        <button id="toggleUiBtn" type="button" title="Show/hide UI controls">Hide UI</button>
       </div>
 
-      <div id="particleControls">
-        <div class="pctl"><span>count</span><input id="particleCount" type="range" min="50" max="2000" step="10" value="2000" /><span id="particleCountVal" class="pv">2000</span></div>
-        <div class="pctl"><span>size</span><input id="particleSize" type="range" min="0.05" max="10" step="0.05" value="1" /><span id="particleSizeVal" class="pv">1.00</span></div>
-        <div class="pctl"><span>speed</span><input id="particleSpeed" type="range" min="0.1" max="3" step="0.1" value="1.0" /><span id="particleSpeedVal" class="pv">1.0x</span></div>
-        <div class="pctl"><span>trail</span><input id="trailLength" type="range" min="0" max="0.8" step="0.02" value="0.16" /><span id="trailLengthVal" class="pv">0.16</span></div>
-        <div class="pctl"><span>saturation</span><input id="particleSaturation" type="range" min="0" max="1" step="0.05" value="0.8" /><span id="particleSaturationVal" class="pv">0.80</span></div>
-        <div class="pctl"><span>brightness</span><input id="particleBrightness" type="range" min="0.1" max="1.4" step="0.05" value="0.8" /><span id="particleBrightnessVal" class="pv">0.80</span></div>
-      </div>
+      <div id="hudBody">
+        <div id="controls">
+          <input id="modelPath" type="text" value="dataKeep/magnetOnTable94_aligned.glb" title="Optional model path" />
+          <button id="loadModelBtn" type="button">Load Model</button>
+          <input id="psiPath" type="text" value="simulatedFields/exports/test_solenoid_psi_contours_2d.json" title="psiContours2d JSON path" />
+          <button id="loadPsiBtn" type="button">Load Psi Contours</button>
+          <input id="thetaSamples" type="number" value="96" min="8" max="360" step="1" title="Number of cylindrical samples" style="width: 90px;" />
+          <input id="streamRotDeg" type="number" value="-90" step="1" title="Rotate in x-z plane (deg)" style="width: 92px;" />
+          <input id="streamZOffset" type="number" value="0.015" step="0.001" title="Source-frame z offset (m)" style="width: 96px;" />
+          <button id="applyTransformBtn" type="button">Apply XZ+Z</button>
+          <button id="toggleLinesBtn" type="button">Hide Streamlines</button>
+          <button id="toggleParticlesBtn" type="button">Hide Particles</button>
+          <button id="fitBtn" type="button">Fit Camera</button>
+        </div>
 
-      <div id="status">Ready.</div>
+        <div id="particleControls">
+          <div class="pctl"><span>count</span><input id="particleCount" type="range" min="50" max="2000" step="10" value="2000" /><span id="particleCountVal" class="pv">2000</span></div>
+          <div class="pctl"><span>size</span><input id="particleSize" type="range" min="0.05" max="10" step="0.05" value="1" /><span id="particleSizeVal" class="pv">1.00</span></div>
+          <div class="pctl"><span>speed</span><input id="particleSpeed" type="range" min="0.1" max="3" step="0.1" value="1.0" /><span id="particleSpeedVal" class="pv">1.0x</span></div>
+          <div class="pctl"><span>trail</span><input id="trailLength" type="range" min="0" max="0.8" step="0.02" value="0.16" /><span id="trailLengthVal" class="pv">0.16</span></div>
+          <div class="pctl"><span>saturation</span><input id="particleSaturation" type="range" min="0" max="1" step="0.05" value="0.8" /><span id="particleSaturationVal" class="pv">0.80</span></div>
+          <div class="pctl"><span>brightness</span><input id="particleBrightness" type="range" min="0.1" max="1.4" step="0.05" value="0.8" /><span id="particleBrightnessVal" class="pv">0.80</span></div>
+        </div>
+
+        <div id="status">Ready.</div>
+      </div>
     </div>
   </div>
 
@@ -150,6 +172,9 @@
 
     const app = document.getElementById('app');
     const statusEl = document.getElementById('status');
+
+    const hudEl = document.getElementById('hud');
+    const toggleUiBtn = document.getElementById('toggleUiBtn');
 
     const modelPathInput = document.getElementById('modelPath');
     const loadModelBtn = document.getElementById('loadModelBtn');
@@ -219,6 +244,7 @@
 
     let linesVisible = false;
     let particlesVisible = true;
+    let uiVisible = false;
 
     const clock = new THREE.Clock();
     let animStarted = false;
@@ -234,6 +260,11 @@
     function updateToggleButtons() {
       toggleLinesBtn.textContent = linesVisible ? 'Hide Streamlines' : 'Show Streamlines';
       toggleParticlesBtn.textContent = particlesVisible ? 'Hide Particles' : 'Show Particles';
+    }
+
+    function updateUiToggleButton() {
+      toggleUiBtn.textContent = uiVisible ? 'Hide UI' : 'Show UI';
+      hudEl.classList.toggle('collapsed', !uiVisible);
     }
 
     function applyVisibility() {
@@ -710,6 +741,11 @@
       requestRender();
     });
 
+    toggleUiBtn.addEventListener('click', () => {
+      uiVisible = !uiVisible;
+      updateUiToggleButton();
+    });
+
     thetaSamplesInput.addEventListener('change', () => {
       if (!psiRoot || contourCount <= 0) return;
       // Re-load from current path so revolution count updates consistently.
@@ -761,6 +797,7 @@
 
     refreshParticleLabels();
     updateToggleButtons();
+    updateUiToggleButton();
 
     loadModel(modelPathInput.value.trim());
     loadPsiContours(psiPathInput.value.trim());
