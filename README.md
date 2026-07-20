@@ -61,3 +61,13 @@ We haven't yet put together detailed instructions on how to complete the calibra
 1. Make sure that when you run `runExperiment.py` you have the correct camera selected in `project_paths.py`
 
 
+## Inspiration
+* The magnificent Magna-AR App that is part of the free smartphone app called [Physics Toolbox](https://www.vieyrasoftware.net/)
+* Arribas, E., Escobar, I., Suarez, C.P., Najera, A., Beléndez, A., 2015. Measurement of the magnetic field of small magnets with a smartphone: a very economical laboratory practice for introductory physics courses. Eur. J. Phys. 36, 065002.  https://iopscience.iop.org/article/10.1088/0143-0807/36/6/065002
+* Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F.J., Marín-Jiménez, M.J., 2014. Automatic generation and detection of highly reliable fiducial markers under occlusion. Pattern Recognit. 47, 2280–2292. https://doi.org/10.1016/j.patcog.2014.01.005
+* Herkommer, M., 2021. Educational Augmented Reality: Interactive Magnetic Field Visualization (Master’s Thesis). Texas Tech University. https://ttu-ir.tdl.org/items/5d10fb52-9768-4c64-a09c-bc5734bb7aca
+* Morris, J.W., 2025. Slug-Mapper: Magnetic Scanner for Ultra Low-Field MRI Scanners. https://doi.org/10.48550/arXiv.2504.21193 
+
+
+
+
