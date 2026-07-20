@@ -41,3 +41,16 @@ Python Dependencies:
 - PySerial for getting streamed USB data `pip install pyserial`
 - SciPy for analytic magnetic field simulation
 - There are various other packages like 'bleak' in the environment.yml as we tested getting data via Bluetooth Low Energy - but so far USB is more stable
+
+
+## Camera calibration
+This setup makes use of external USB webcams - and OpenCV has packages for getting the camera calibration matrix which is necessary for accurate conversion of the detected ArUco markers into 3D spatial coordinates matching the room.
+
+We haven't yet put together detailed instructions on how to complete the calibration process on a new camera - but you would need to:
+
+1. Have the `checkerboard_7x10_squares_25mm.png` file handy. This can be shown on a screen (if it's not very reflective), but we've found it easiest to print it out on A4 and just lay it on the table so it is nice and flat.
+1. Run the `captureFrames_matchRunExperiment.py` to capture a series of 10-15 frames with the checkerboard in different parts of the image and at different distances
+1. Run the `camera-calibration_KK.py` script on those images to calculate the 3x3 camera calibration .npz file
+1. Make sure that when you run `runExperiment.py` you have the correct camera selected in `project_paths.py`
+
+

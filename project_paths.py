@@ -5,6 +5,7 @@ does not require updating absolute paths in the scripts.
 """
 from pathlib import Path
 
+# this file still needs cleaning up and having just the critical paths and settings - there is stuff here that isn't currently used...
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 CALIBRATION_ROOT = PROJECT_ROOT / "cameraCalibration"
